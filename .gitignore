@@ -1,0 +1,7 @@
+.env
+*.pyc
+venv/
+__pycache__/
+.pytest_cache/
+.ruff_cache
+jaeger-2.20.0-linux-amd64

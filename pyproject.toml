@@ -1,0 +1,14 @@
+[tool.ruff]
+line-length = 1000
+indent-width = 2
+target-version = "py312"
+
+[tool.ruff.lint]
+# Standard production rule set:
+#   E/W  pycodestyle (style)          F    pyflakes (unused imports, undefined names)
+#   I    isort (import sorting)       UP   pyupgrade (modernize syntax)
+#   B    flake8-bugbear (common bug patterns/gotchas)
+select = ["E", "W", "F", "I", "UP", "B"]
+
+[tool.ruff.format]
+quote-style = "single"
