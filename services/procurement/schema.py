@@ -87,7 +87,7 @@ class ClaimedRecord:
   variety: Reading = field(default_factory=Reading)
   quantity: Reading = field(default_factory=lambda: Reading(value=Measure()))
   quality: Reading = field(default_factory=Reading)
-  state: Reading = field(default=Reading)  # CropState
+  crop_state: Reading = field(default_factory=Reading)  # CropState
   location: Reading = field(default_factory=Reading)
 
   # TERMS (negotiable positions)
@@ -169,46 +169,50 @@ class Qualification:
     return self.verdict != Verdict.INCOMPLETE
 
 
-# CallMeta
-
-
-class CallDirection(Enum):
-  """
-  Whether the call is Inbound or Outbound.
-  States:
-    INBOUND - incoming call
-    OUTBOUND - outgoing call
-  """
-
-  INBOUND = 'inbound'
-  OUTBOUND = 'outbound'
-
-
-@dataclass
-class CallMeta:
-  """
-  Call level metadata
-  """
-
-  direction: CallDirection = CallDirection.OUTBOUND
-  turn_count: int = 0
-
-
 # CallState
 
 
+class ConversationChannel(Enum):
+  """Which medium the conversation is happening over"""
+
+  VOICE = 'voice'
+
+
+class ConversationInitiator(Enum):
+  US = 'us'
+  THEM = 'them'
+
+
 @dataclass
-class CallState:
+class ConversationMeta:
   """
-  The full statement of one procurement call, carried turn to turn.
+  Channel agnostic conversation metadata
+  """
+
+  channel: ConversationChannel = ConversationChannel.VOICE
+  initiated_by: ConversationInitiator = ConversationInitiator.US
+  turn_count: int = 0
+
+
+@dataclass
+class CallMeta(ConversationMeta):
+  """
+  Call level metadata. Extends ConversationMeta
+  """
+
+
+@dataclass
+class ConversationState:
+  """
+  The full statement of one procurement conversation, carried turn to turn.
   """
 
   claimed: ClaimedRecord = field(default_factory=ClaimedRecord)
   qualification: Qualification = field(default_factory=Qualification)
-  meta: CallMeta = field(default_factory=CallMeta)
+  meta: ConversationMeta = field(default_factory=CallMeta)
 
   def is_done(self) -> bool:
     """
-    Whether the call can be closed. The record is complete, a real verdict has been reached and nothing required is in low-confidence state.
+    Whether the record is complete, a real verdict has been reached, and nothing required is in a low-confidence state. On voice, the channel may then end the call; other channels decide their own action.
     """
     return self.claimed.is_completed() and self.qualification.is_decided() and not self.claimed.unconfirmed()
