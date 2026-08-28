@@ -86,7 +86,7 @@ class ClaimedRecord:
   crop: Reading = field(default_factory=Reading)
   variety: Reading = field(default_factory=Reading)
   quantity: Reading = field(default_factory=lambda: Reading(value=Measure()))
-  quality: Reading = field(default_factory=Reading)
+  grade: Reading = field(default_factory=Reading)
   crop_state: Reading = field(default_factory=Reading)  # CropState
   location: Reading = field(default_factory=Reading)
 
@@ -97,27 +97,6 @@ class ClaimedRecord:
   transport: Reading = field(default_factory=Reading)  # who bears it
 
   contact: Reading = field(default_factory=Reading)
-
-  # Fields the qualification decision needs before it can run. Facts + asking price to negotiate from
-  REQUIRED = ('crop', 'quantity', 'quality', 'state', 'location', 'price')
-
-  def missing(self) -> list[str]:
-    """
-    Required fields not yet known - tells the agent what's still open to ask each.
-    """
-    return [name for name in self.REQUIRED if not getattr(self, name).is_known()]
-
-  def unconfirmed(self) -> list[str]:
-    """
-    Known-but-low-confidence required fields - should be checked back before the agent relies on them to qualify.
-    """
-    return [name for name in self.REQUIRED if getattr(self, name).needs_confirmation()]
-
-  def is_completed(self) -> bool:
-    """
-    The gate: True when every required field is known, otherwise False.
-    """
-    return not self.missing()
 
 
 # QUALIFICATION
@@ -179,6 +158,8 @@ class ConversationChannel(Enum):
 
 
 class ConversationInitiator(Enum):
+  """Who initiated the conversation?"""
+
   US = 'us'
   THEM = 'them'
 
@@ -204,15 +185,49 @@ class CallMeta(ConversationMeta):
 @dataclass
 class ConversationState:
   """
-  The full statement of one procurement conversation, carried turn to turn.
+  The full state of one procurement conversation, carried turn to turn.
   """
 
   claimed: ClaimedRecord = field(default_factory=ClaimedRecord)
   qualification: Qualification = field(default_factory=Qualification)
   meta: ConversationMeta = field(default_factory=CallMeta)
 
-  def is_done(self) -> bool:
+  def is_done(self, config: dict) -> bool:
     """
     Whether the record is complete, a real verdict has been reached, and nothing required is in a low-confidence state. On voice, the channel may then end the call; other channels decide their own action.
     """
-    return self.claimed.is_completed() and self.qualification.is_decided() and not self.claimed.unconfirmed()
+    return is_completed(self.claimed, config) and self.qualification.is_decided() and not unconfirmed(self.claimed, config)
+
+
+# VALIDATION
+
+BASE_REQUIRED = ('crop', 'quantity', 'crop_state', 'location', 'price')
+
+
+def required_fields(config: dict) -> tuple[str, ...]:
+  """Resolves which fields are required for a given crop."""
+  fields = BASE_REQUIRED
+  if 'grades' in config:
+    fields += ('grade',)
+  return fields
+
+
+def missing(record: ClaimedRecord, config: dict) -> list[str]:
+  """
+  Required fields not yet known - tells the agent what's still open to ask each.
+  """
+  return [name for name in required_fields(config) if not getattr(record, name).is_known()]
+
+
+def unconfirmed(record: ClaimedRecord, config: dict) -> list[str]:
+  """
+  Known-but-low-confidence required fields - should be checked back before the agent relies on them to qualify.
+  """
+  return [name for name in required_fields(config) if getattr(record, name).needs_confirmation()]
+
+
+def is_completed(record: ClaimedRecord, config: dict) -> bool:
+  """
+  The gate: True when every required field is known, otherwise False.
+  """
+  return not missing(record, config)

@@ -1,0 +1,18 @@
+defaults:
+  quantity_unit: quintal
+  price_unit: '₹/quintal'
+  min_quantity: 10
+  negotiate_margin_pct: 2
+
+crops:
+  wheat:
+    price: 2450
+    min_quantity: 20
+  
+  onion:
+    grades:
+      super: 2200
+      mota: 2000
+      medium: 1800
+      golta: 1600
+    negotiate_margin_pct: 5
