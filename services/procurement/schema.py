@@ -106,14 +106,12 @@ class Verdict(Enum):
   """
   The outcome the agent reaches about a lot by the end of a call.
   States:
-    PROCURE - facts acceptable, price workable. Firm yes.
-    NEGOTIATE - facts fine, but terms (price/payment/transport) need working out. Conditional yes-if-we-agree.
+    NEGOTIATE - facts acceptable and asking price is within market band (reference + margin). Every qualified lot lands here — price is always provisional, fixed only after grading at intake. Compare record.price to target_price for how close the ask was.
     FORWARD - not yet available (standing/harvesting crop). Yes-but-revisit-at-harvest.
     DECLINE - a FACT disqualifies it (wrong crop, too small, unusable grade, uneconomic location). Firm no. Note: price never causes DECLINE — an over-ask is NEGOTIATE, not a no.
     INCOMPLETE - no decision could be reached (farmer evasive, call dropped, a required fact never obtained). Not a decision about the lot.
   """
 
-  PROCURE = 'procure'
   NEGOTIATE = 'negotiate'
   FORWARD = 'forward'
   DECLINE = 'decline'
