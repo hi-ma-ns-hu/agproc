@@ -1,4 +1,4 @@
-.PHONY: install dev lint lint-fix format
+.PHONY: install dev lint lint-fix format test
 
 # install dependencies
 install:
@@ -19,3 +19,16 @@ lint-fix:
 # auto-format the codebase
 format:
 	ruff format .
+
+# make test
+# make test file=file_path
+# make test file=file_path func=func_name
+test:
+ifdef func
+ifndef file
+	$(error set file=<path> when using func=<name>)
+endif
+	pytest "$(file)::$(func)"
+else
+	pytest $(file)
+endif
