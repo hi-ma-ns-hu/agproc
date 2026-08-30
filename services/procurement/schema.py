@@ -180,6 +180,30 @@ class CallMeta(ConversationMeta):
   """
 
 
+class Role(Enum):
+  """
+  LLM conversation sequence.
+  States:
+    SYSTEM - instructions and context that set up the conversation.
+    USER - a turn from the user side
+    ASSISTANT - a turn produced by the model, either a reply or a tool call
+    TOOL - the result of a tool call, fed back to the model for the next turn
+  """
+
+  SYSTEM = 'system'
+  USER = 'user'
+  ASSISTANT = 'assistant'
+  TOOL = 'tool'
+
+
+@dataclass
+class ConversationHistory:
+  """A message in the conversation history."""
+
+  role: Role
+  content: str
+
+
 @dataclass
 class ConversationState:
   """
@@ -189,3 +213,4 @@ class ConversationState:
   claimed: ClaimedRecord = field(default_factory=ClaimedRecord)
   qualification: Qualification = field(default_factory=Qualification)
   meta: ConversationMeta = field(default_factory=CallMeta)
+  history: list[ConversationHistory] = field(default_factory=list)

@@ -38,6 +38,9 @@ class Settings(BaseSettings):
   # ── TRACING ──────────────────────────────────────────────
   TRACELOOP_API_ENDPOINT: str
 
+  # ── MODEL ──────────────────────────────────────────────
+  PROCUREMENT_MODEL: str = 'gpt-4o'
+
   # ── COMPUTED ────────────────────────────────────────────────────────────────
   @computed_field
   @property

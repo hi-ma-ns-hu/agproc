@@ -16,3 +16,4 @@ quote-style = "single"
 [tool.pytest.ini_options]
 testpaths = ["services"]
 python_files = ["tests/*.py"]
+asyncio_mode = 'auto'

@@ -32,7 +32,7 @@ class ExtractedField(BaseModel):
   confidence: Literal['low', 'high']
 
 
-class TurnOutput(BaseModel):
+class ConversationOutput(BaseModel):
   """Everything turn() needs back from one LLM call."""
 
   updates: list[ExtractedField] = Field(default_factory=list)
