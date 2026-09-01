@@ -1,6 +1,6 @@
-# Vaani
+# AgProc
 
-Vaani is an inbound and outbound voice agent for agricultural procurement. It calls farmers or takes their calls and holds an open, goal-directed conversation to collect and qualify a produce lot: what crop, how much, what grade, expected price, pickup location, availability. Rather than reading a rigid script, it reasons about what the farmer actually says, handles corrections and digressions, and reaches a justified procurement judgment by the end of the call. The structured record is a byproduct of the conversation, not a form the caller is walked through.
+AgProc is an inbound and outbound voice agent for agricultural procurement. It calls farmers or takes their calls and holds an open, goal-directed conversation to collect and qualify a produce lot: what crop, how much, what grade, expected price, pickup location, availability. Rather than reading a rigid script, it reasons about what the farmer actually says, handles corrections and digressions, and reaches a justified procurement judgment by the end of the call. The structured record is a byproduct of the conversation, not a form the caller is walked through.
 
 ---
 
@@ -34,7 +34,7 @@ Vaani is an inbound and outbound voice agent for agricultural procurement. It ca
 ## Project structure
 
 ```
-vaani/
+agproc/
 ├── app.py                  # FastAPI factory: lifespan, health routes, trace middleware
 ├── config.py                # typed settings (pydantic-settings)
 ├── main.py                   # `from app import app` — entrypoint for `fastapi deploy`/`fastapi run`
@@ -67,7 +67,7 @@ vaani/
 ### Setup
 ```bash
 git clone <your-repo-url>
-cd vaani
+cd agproc
 
 python -m venv venv
 source venv/bin/activate
@@ -120,7 +120,7 @@ Docker required — Docker's daemon is real overhead if you don't need it elsewh
    ./jaeger
    ```
 3. Set `TRACELOOP_API_ENDPOINT=http://localhost:4318` in `.env` (already the default there).
-4. Run the app, hit a route, then open http://localhost:16686 and search for the `vaani` service.
+4. Run the app, hit a route, then open http://localhost:16686 and search for the `agproc` service.
 
 Notes:
 - Storage is in-memory — restarting Jaeger wipes all traces. Fine for local dev, not for keeping

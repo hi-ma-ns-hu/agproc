@@ -40,7 +40,7 @@ signal.signal(signal.SIGTERM, _handle_sigterm)
 # lifespan
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-  logger.info('Vaani starting', env=settings.APP_ENV)
+  logger.info('AgProc starting', env=settings.APP_ENV)
 
   # from services import SlackAdapter, set_slack
   # set_slack(await SlackAdapter().initialize())
@@ -49,7 +49,7 @@ async def lifespan(app: FastAPI):
 
   await redis.aclose()
   await engine.dispose()
-  logger.info('Vaani shutdown complete')
+  logger.info('AgProc shutdown complete')
 
 
 def _add_health_routes(app: FastAPI) -> None:
@@ -121,7 +121,7 @@ def _add_trace_middleware(app: FastAPI) -> None:
 
 # app factory
 def create_app() -> FastAPI:
-  app = FastAPI(title='Vaani', version='0.1.0', lifespan=lifespan, root_path='/api', docs_url='/docs' if settings.IS_DEVELOPMENT else None, redoc_url=None)
+  app = FastAPI(title='AgProc', version='0.1.0', lifespan=lifespan, root_path='/api', docs_url='/docs' if settings.IS_DEVELOPMENT else None, redoc_url=None)
   FastAPIInstrumentor.instrument_app(app)
   _add_trace_middleware(app)
   _add_health_routes(app)

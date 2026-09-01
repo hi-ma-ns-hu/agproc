@@ -33,7 +33,7 @@ def init_tracing() -> None:
   from traceloop.sdk import Traceloop
 
   Traceloop.init(
-    app_name='vaani',
+    app_name='agproc',
     api_endpoint=settings.TRACELOOP_API_ENDPOINT,
     disable_batch=settings.IS_DEVELOPMENT,
   )
