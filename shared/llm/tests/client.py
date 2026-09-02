@@ -92,3 +92,13 @@ async def test_backoff_is_called_between_retries():
       await get_llm_response([{'role': 'user', 'content': 'hi'}], DummyOutput)
 
   mock_sleep.assert_called_once()
+
+
+async def test_tools_param_omitted_when_none_given():
+  fake_client = AsyncMock()
+  fake_client.beta.chat.completions.parse = AsyncMock(return_value=_fake_response(DummyOutput(reply='hi')))
+  with patch('shared.llm.client.get_llm_client', return_value=fake_client):
+    await get_llm_response([{'role': 'user', 'content': 'hi'}], DummyOutput, tools=None)
+
+  call_kwargs = fake_client.beta.chat.completions.parse.call_args.kwargs
+  assert 'tools' not in call_kwargs

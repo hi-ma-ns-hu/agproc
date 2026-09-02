@@ -23,22 +23,35 @@ class LLMCallFailed(Exception):
   """Raised when a LLM call fails."""
 
 
-async def get_llm_response(messages: list[dict], response_model: type[BaseModel], model: str | None = None, max_retries=2):
+async def get_llm_response(messages: list[dict], response_model: type[BaseModel], tools: list[dict] | None = None, model: str | None = None, max_retries=2):
   """
-  Call the LLM and get back a validated instance of response_model.
-  Retries on transient errors (rate limit, timeout) and on responses that fail to parse/validate, with a short backoff. Raises LLMCallFailed if all attempts are exhausted — callers decide how to degrade gracefully (e.g. turn() can apologize and ask the farmer to repeat themselves), rather than this function
+  Call the LLM and get back either:
+    - a validated response_model instance (no tools requested, or tools
+      given but the model didn't call one this turn), or
+    - the raw message object, if tools were given and the model requested
+      one (caller must check message.tool_calls and handle the round-trip).
+
+  Retries on transient API errors and on responses that fail to validate,
+  with a short backoff. Raises LLMCallFailed after exhausting attempts.
   """
   client = get_llm_client()
   error: Exception | None = None
   for attempt in range(1, max_retries + 2):
     try:
-      response = await client.beta.chat.completions.parse(model=model, messages=messages, response_format=response_model)
+      kwargs = {'model': model, 'messages': messages, 'response_format': response_model}
+      if tools:
+        kwargs['tools'] = tools
 
-      parsed_response = response.choices[0].message.parsed
+      response = await client.beta.chat.completions.parse(**kwargs)
 
-      if parsed_response is None:
+      message = response.choices[0].message
+
+      if tools and message.tool_calls:
+        return message
+
+      if message.parsed is None:
         raise ValidationError.from_exception_data('Empty structured response', [])
-      return parsed_response
+      return message.parsed
 
     except (RateLimitError, APITimeoutError, APIError) as err:
       error = err
@@ -48,5 +61,6 @@ async def get_llm_response(messages: list[dict], response_model: type[BaseModel]
     except ValidationError as err:
       error = err
       logger.warning(f'LLM call attempt {attempt} returned invalid. structure: {err}')
+      await asyncio.sleep(0.5 * attempt)
 
   raise LLMCallFailed(f'LLM call failed after {max_retries + 1} attempts: {error}') from error

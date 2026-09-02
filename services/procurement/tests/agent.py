@@ -1,10 +1,11 @@
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from shared import LLMCallFailed
 
 from ..agent import _render_refdata, _render_verdict, conversation
 from ..contract import ConversationOutput, ExtractedField, MeasureValue
 from ..schema import Confidence, ConversationState, CropState, Measure, Role, Verdict
+from ..tools import TOOLS
 
 
 def _mock_llm(output: ConversationOutput):
@@ -142,3 +143,33 @@ def test_render_verdict_includes_target_price():
   text = _render_verdict(state)
   assert 'negotiate' in text.lower()
   assert '2450' in text
+
+
+async def test_turn_takes_simple_path_when_no_tools_active():
+  assert TOOLS == []
+  fake = ConversationOutput(updates=[], reply='ok')
+  with patch('services.procurement.agent.get_llm_response', new=AsyncMock(return_value=fake)):
+    state = ConversationState()
+    result = await conversation('hello', state)
+  assert result['reply'] == 'ok'
+
+
+async def test_turn_resolves_tool_call_and_persists_only_the_result():
+  fake_tool_call = MagicMock()
+  fake_tool_call.id = 'call_1'
+  fake_tool_call.function.name = 'get_commodity_price'
+  fake_tool_call.function.arguments = '{"crop": "wheat"}'
+  fake_message = MagicMock()
+  fake_message.tool_calls = [fake_tool_call]
+  final_output = ConversationOutput(updates=[], reply='Let me check that for you.')
+  with patch('services.procurement.agent.TOOLS', [{'type': 'function', 'function': {'name': 'get_commodity_price'}}]):
+    with patch(
+      'services.procurement.agent.get_llm_response',
+      new=AsyncMock(side_effect=[fake_message, final_output]),
+    ):
+      state = ConversationState()
+      result = await conversation("what's wheat going for?", state)
+  assert result['reply'] == 'Let me check that for you.'
+  tool_turns = [t for t in result['state'].history if t.role.value == 'tool']
+  assert len(tool_turns) == 1
+  assert tool_turns[0].content == 'Unknown tool: get_commodity_price'

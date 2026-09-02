@@ -105,7 +105,7 @@ def test_not_done_when_incomplete(record):
   # onion needs grade, which record doesn't have
   state = ConversationState()
   state.claimed = record
-  state.qualification.decide(Verdict.PROCURE, 'clean lot')
+  state.qualification.decide(Verdict.NEGOTIATE, 'clean lot')
   assert is_done(state, ONION_CONFIG) is False
 
 
@@ -120,12 +120,12 @@ def test_not_done_when_required_field_unconfirmed(record):
   record.price.update(Measure(2450, '₹/quintal'), Confidence.LOW, 3)
   state = ConversationState()
   state.claimed = record
-  state.qualification.decide(Verdict.PROCURE, 'clean lot')
+  state.qualification.decide(Verdict.NEGOTIATE, 'clean lot')
   assert is_done(state, WHEAT_CONFIG) is False
 
 
 def test_done_when_complete_decided_and_confirmed(record):
   state = ConversationState()
   state.claimed = record
-  state.qualification.decide(Verdict.PROCURE, 'clean lot at reference')
+  state.qualification.decide(Verdict.NEGOTIATE, 'clean lot at reference')
   assert is_done(state, WHEAT_CONFIG) is True

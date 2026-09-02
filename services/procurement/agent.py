@@ -1,3 +1,5 @@
+import json
+
 from config import settings
 from shared import LLMCallFailed, get_llm_response, get_logger
 
@@ -8,6 +10,7 @@ from .qualification import qualify
 from .refdata import crop_config as config
 from .refdata import load_refdata
 from .schema import ConversationHistory, ConversationState, Role
+from .tools import TOOLS
 from .validation import is_completed, is_done
 
 logger = get_logger(__name__)
@@ -32,6 +35,30 @@ def _render_verdict(state: ConversationState) -> str:
   return f'VERDICT: {qualification.verdict.value}\nREASON: {qualification.reason}\nTARGET PRICE: {target_price}'
 
 
+def _execute_tool(name: str, args: dict, refdata: dict) -> str:
+  return f'Unknown tool: {name}'
+
+
+async def _resolve_tool_calls(message, messages: list[dict], refdata: dict, state: ConversationState, turn_num: int) -> ConversationOutput:
+  """
+  Execute the tool(s) the model requested. Only the tool's result gets persisted to state.history, as plain content.
+  """
+  for tool_call in message.tool_calls:
+    args = json.loads(tool_call.function.arguments)
+    result_txt = _execute_tool(tool_call.function.name, args, refdata)
+
+    logger.info(f'Turn {turn_num} tool call: {tool_call.function.name}({tool_call.function.arguments}) -> {result_txt}')
+
+    messages.append({'role': 'assistant', 'tool_calls': [{'id': tool_call.id, 'type': 'function', 'function': {'name': tool_call.function.name, 'arguments': tool_call.function.arguments}}]})
+    messages.append({'role': 'tool', 'tool_call_id': tool_call.id, 'content': result_txt})
+    state.history.append(ConversationHistory(role=Role.TOOL, content=result_txt))
+
+  result = await get_llm_response(messages, ConversationOutput, tools=TOOLS or None, model=settings.PROCUREMENT_MODEL)
+  if not isinstance(result, ConversationOutput):
+    raise LLMCallFailed('Model requested a second tool call in one conversation turn - not supported yet.')
+  return result
+
+
 async def conversation(input: str, state: ConversationState, channel: str = 'voice') -> dict:
   """One turn of the conversation: extract, update memory, qualify and respond."""
   refdata = load_refdata()
@@ -45,7 +72,13 @@ async def conversation(input: str, state: ConversationState, channel: str = 'voi
   messages.append({'role': 'user', 'content': input})
 
   try:
-    output: ConversationOutput = await get_llm_response(messages, ConversationOutput, settings.PROCUREMENT_MODEL)
+    result = await get_llm_response(messages, ConversationOutput, tools=TOOLS or None, model=settings.PROCUREMENT_MODEL)
+
+    if not isinstance(result, ConversationOutput):
+      output = await _resolve_tool_calls(result, messages, refdata, state, turn_num)
+    else:
+      output = result
+
   except LLMCallFailed:
     logger.error(f'Turn {turn_num} LLM call failed.')
     return {'reply': "Sorry, I'm having trouble right now - could you say that again?", 'state': state, 'done': False}

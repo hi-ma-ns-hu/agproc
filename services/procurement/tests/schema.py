@@ -47,9 +47,9 @@ def test_update_revises_previous_value():
 # Qualification: decide guard
 def test_decide_sets_verdict_and_reason():
   q = Qualification()
-  q.decide(Verdict.PROCURE, 'clean lot at reference price')
+  q.decide(Verdict.NEGOTIATE, 'clean lot at reference price')
   assert q.is_decided() is True
-  assert q.verdict is Verdict.PROCURE
+  assert q.verdict is Verdict.NEGOTIATE
   assert q.reason == 'clean lot at reference price'
 
 
@@ -72,5 +72,5 @@ def test_decide_rejects_whitespace_only_reason():
 def test_decide_carries_optional_price():
   q = Qualification()
   band = Measure(2200, '₹/quintal')
-  q.decide(Verdict.PROCURE, 'asking above reference', price=band)
+  q.decide(Verdict.NEGOTIATE, 'asking above reference', price=band)
   assert q.price is band
