@@ -126,3 +126,121 @@ def test_apply_updates_partial_success_counts_correctly():
   ]
   result = apply_updates(rec, updates, turn=1)
   assert result == 2
+
+
+def test_grade_rejected_for_ungraded_crop():
+  rec = ClaimedRecord()
+  ungraded_cfg = {'price': 2450}
+  ok = apply_update(
+    rec,
+    ExtractedField(field='grade', value='decent quality', confidence='low'),
+    turn=1,
+    crop_config=ungraded_cfg,
+  )
+  assert ok is False
+  assert rec.grade.is_known() is False
+
+
+def test_grade_accepted_for_graded_crop():
+  rec = ClaimedRecord()
+  graded_cfg = {'grades': {'mota': 2000, 'golta': 1600}}
+  ok = apply_update(
+    rec,
+    ExtractedField(field='grade', value='mota', confidence='high'),
+    turn=1,
+    crop_config=graded_cfg,
+  )
+  assert ok is True
+  assert rec.grade.value == 'mota'
+
+
+def test_apply_updates_passes_crop_config_through_to_each_update():
+  rec = ClaimedRecord()
+  ungraded_cfg = {'price': 2450}
+  updates = [
+    ExtractedField(field='crop', value='wheat', confidence='high'),
+    ExtractedField(field='grade', value='decent', confidence='low'),  # should be rejected
+  ]
+  count = apply_updates(rec, updates, turn=1, crop_config=ungraded_cfg)
+  assert count == 1
+  assert rec.crop.value == 'wheat'
+  assert rec.grade.is_known() is False
+
+
+def test_crop_state_accepts_exact_enum_word():
+  rec = ClaimedRecord()
+  ok = apply_update(rec, ExtractedField(field='crop_state', value='harvested', confidence='high'), turn=1)
+  assert ok is True
+  assert rec.crop_state.value is CropState.HARVESTED
+
+
+def test_crop_state_rejects_paraphrase():
+  rec = ClaimedRecord()
+  for bad_value in ['in storage', 'ready', 'stored', 'picked']:
+    ok = apply_update(rec, ExtractedField(field='crop_state', value=bad_value, confidence='high'), turn=1)
+    assert ok is False, f'{bad_value!r} should have been rejected'
+    assert rec.crop_state.is_known() is False
+
+
+def test_price_accepts_measure_value():
+  rec = ClaimedRecord()
+  ok = apply_update(
+    rec,
+    ExtractedField(field='price', value=MeasureValue(value=2400, unit='quintal'), confidence='high'),
+    turn=1,
+  )
+  assert ok is True
+  assert rec.price.value.value == 2400
+
+
+def test_price_rejects_plain_string():
+  rec = ClaimedRecord()
+  ok = apply_update(rec, ExtractedField(field='price', value='2400 per quintal', confidence='high'), turn=1)
+  assert ok is False
+  assert rec.price.is_known() is False
+
+
+def test_price_unit_gets_currency_injected_when_quantity_unknown():
+  rec = ClaimedRecord()
+  ok = apply_update(
+    rec,
+    ExtractedField(field='price', value=MeasureValue(value=2450, unit='quintal'), confidence='high'),
+    turn=1,
+  )
+  assert ok is True
+  assert rec.price.value.unit == '₹/quintal'
+
+
+def test_price_unit_is_independent_of_quantity_unit():
+  rec = ClaimedRecord()
+  apply_update(rec, ExtractedField(field='quantity', value=MeasureValue(value=40, unit='kg'), confidence='high'), turn=1)
+  ok = apply_update(
+    rec,
+    ExtractedField(field='price', value=MeasureValue(value=50, unit='quintal'), confidence='high'),
+    turn=2,
+  )
+  assert ok is True
+  assert rec.price.value.unit == '₹/quintal'
+
+
+def test_price_unit_strips_currency_prefix_if_model_included_one():
+  rec = ClaimedRecord()
+  ok = apply_update(
+    rec,
+    ExtractedField(field='price', value=MeasureValue(value=2450, unit='rs/quintal'), confidence='high'),
+    turn=1,
+  )
+  assert ok is True
+  assert rec.price.value.unit == '₹/quintal'
+
+
+def test_price_currency_is_always_settings_currency_regardless_of_model_output():
+  rec = ClaimedRecord()
+  apply_update(rec, ExtractedField(field='price', value=MeasureValue(value=2450, unit='usd/quintal'), confidence='high'), turn=1)
+  assert rec.price.value.unit == '₹/quintal'
+
+
+def test_price_rejected_when_no_unit_available_at_all():
+  rec = ClaimedRecord()
+  ok = apply_update(rec, ExtractedField(field='price', value=MeasureValue(value=2450, unit=''), confidence='high'), turn=1)
+  assert ok is False

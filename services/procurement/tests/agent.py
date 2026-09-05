@@ -2,14 +2,14 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from shared import LLMCallFailed
 
-from ..agent import _render_refdata, _render_verdict, conversation
+from ..agent import conversation
 from ..contract import ConversationOutput, ExtractedField, MeasureValue
 from ..schema import Confidence, ConversationState, CropState, Measure, Role, Verdict
 from ..tools import TOOLS
 
 
 def _mock_llm(output: ConversationOutput):
-  """Patch call_structured to return a fixed ConversationOutput instead of calling the API."""
+  """Patch get_llm_response to return a fixed ConversationOutput instead of calling the API."""
   return patch('services.procurement.agent.get_llm_response', new=AsyncMock(return_value=output))
 
 
@@ -88,22 +88,27 @@ async def test_turn_does_not_qualify_when_record_incomplete():
 
 
 async def test_turn_qualifies_once_record_becomes_complete():
-  # pre-fill everything except the last required field
   state = ConversationState()
   state.claimed.crop.update('wheat', Confidence.HIGH, 1)
   state.claimed.quantity.update(Measure(40, 'quintal'), Confidence.HIGH, 1)
   state.claimed.crop_state.update(CropState.HARVESTED, Confidence.HIGH, 1)
   state.claimed.location.update('farm gate', Confidence.HIGH, 1)
-  # price still missing
 
-  fake = ConversationOutput(
+  normal_reply = ConversationOutput(
     updates=[ExtractedField(field='price', value=MeasureValue(value=2450, unit='₹/quintal'), confidence='high')],
     reply='Thanks — let me check that for you.',
   )
-  with _mock_llm(fake):
+  closing_reply = ConversationOutput(updates=[], reply="Great, we'll follow up soon. Thanks!")
+
+  with patch(
+    'services.procurement.agent.get_llm_response',
+    new=AsyncMock(side_effect=[normal_reply, closing_reply]),
+  ):
     result = await conversation('2450 per quintal', state)
 
   assert result['state'].qualification.is_decided() is True
+  assert result['reply'] == "Great, we'll follow up soon. Thanks!"
+  assert result['done'] is True
 
 
 async def test_turn_does_not_requalify_once_decided():
@@ -123,26 +128,6 @@ async def test_turn_does_not_requalify_once_decided():
     await conversation('ok thanks', state)
 
   assert state.qualification.reason == 'already decided earlier'
-
-
-def test_render_refdata_graded_crop():
-  refdata = {'crops': {'onion': {'grades': {'mota': 2000}}}}
-  text = _render_refdata(refdata)
-  assert 'onion' in text and 'mota' in text and '2000' in text
-
-
-def test_render_refdata_ungraded_crop():
-  refdata = {'crops': {'wheat': {'price': 2450}}}
-  text = _render_refdata(refdata)
-  assert 'wheat' in text and '2450' in text and 'ungraded' in text
-
-
-def test_render_verdict_includes_target_price():
-  state = ConversationState()
-  state.qualification.decide(Verdict.NEGOTIATE, 'in band', price=Measure(2450, '₹/quintal'))
-  text = _render_verdict(state)
-  assert 'negotiate' in text.lower()
-  assert '2450' in text
 
 
 async def test_turn_takes_simple_path_when_no_tools_active():
@@ -173,3 +158,136 @@ async def test_turn_resolves_tool_call_and_persists_only_the_result():
   tool_turns = [t for t in result['state'].history if t.role.value == 'tool']
   assert len(tool_turns) == 1
   assert tool_turns[0].content == 'Unknown tool: get_commodity_price'
+
+
+async def test_closing_call_fires_only_when_qualification_completes_this_turn():
+  state = ConversationState()
+  state.claimed.crop.update('wheat', Confidence.HIGH, 1)
+  state.claimed.quantity.update(Measure(40, 'quintal'), Confidence.HIGH, 1)
+  state.claimed.crop_state.update(CropState.HARVESTED, Confidence.HIGH, 1)
+  state.claimed.location.update('farm gate', Confidence.HIGH, 1)
+
+  normal_reply = ConversationOutput(
+    updates=[ExtractedField(field='price', value=MeasureValue(value=2450, unit='₹/quintal'), confidence='high')],
+    reply='checking...',
+  )
+  closing_reply = ConversationOutput(updates=[], reply='closing message')
+  mock_call = AsyncMock(side_effect=[normal_reply, closing_reply])
+
+  with patch('services.procurement.agent.get_llm_response', new=mock_call):
+    await conversation('2450 per quintal', state)
+
+  assert mock_call.call_count == 2
+
+
+async def test_no_closing_call_when_record_still_incomplete():
+  fake = ConversationOutput(updates=[], reply='how much do you have?')
+  mock_call = AsyncMock(return_value=fake)
+
+  with patch('services.procurement.agent.get_llm_response', new=mock_call):
+    state = ConversationState()
+    await conversation('I have wheat', state)
+
+  assert mock_call.call_count == 1
+
+
+async def test_closing_reply_replaces_history_entry():
+  state = ConversationState()
+  state.claimed.crop.update('wheat', Confidence.HIGH, 1)
+  state.claimed.quantity.update(Measure(40, 'quintal'), Confidence.HIGH, 1)
+  state.claimed.crop_state.update(CropState.HARVESTED, Confidence.HIGH, 1)
+  state.claimed.location.update('farm gate', Confidence.HIGH, 1)
+
+  normal_reply = ConversationOutput(
+    updates=[ExtractedField(field='price', value=MeasureValue(value=2450, unit='₹/quintal'), confidence='high')],
+    reply='pre-close reply that should be overwritten',
+  )
+  closing_reply = ConversationOutput(updates=[], reply='the real closing reply')
+
+  with patch(
+    'services.procurement.agent.get_llm_response',
+    new=AsyncMock(side_effect=[normal_reply, closing_reply]),
+  ):
+    result = await conversation('2450 per quintal', state)
+
+  last_turn = result['state'].history[-1]
+  assert last_turn.content == 'the real closing reply'
+  assert 'pre-close' not in last_turn.content
+
+
+async def test_does_not_requalify_no_extra_closing_call_on_later_turns():
+  state = ConversationState()
+  state.claimed.crop.update('wheat', Confidence.HIGH, 1)
+  state.claimed.quantity.update(Measure(40, 'quintal'), Confidence.HIGH, 1)
+  state.claimed.crop_state.update(CropState.HARVESTED, Confidence.HIGH, 1)
+  state.claimed.location.update('farm gate', Confidence.HIGH, 1)
+  state.claimed.price.update(Measure(2450, '₹/quintal'), Confidence.HIGH, 1)
+  state.qualification.decide(Verdict.NEGOTIATE, 'already decided')
+
+  fake = ConversationOutput(updates=[], reply='anything else?')
+  mock_call = AsyncMock(return_value=fake)
+
+  with patch('services.procurement.agent.get_llm_response', new=mock_call):
+    await conversation('ok thanks', state)
+
+  assert mock_call.call_count == 1
+
+
+async def test_no_closing_call_when_qualified_but_unconfirmed():
+  state = ConversationState()
+  state.claimed.crop.update('wheat', Confidence.HIGH, 1)
+  state.claimed.quantity.update(Measure(40, 'quintal'), Confidence.HIGH, 1)
+  state.claimed.crop_state.update(CropState.HARVESTED, Confidence.LOW, 1)  # shaky
+  state.claimed.location.update('Karnal', Confidence.HIGH, 1)
+
+  normal_reply = ConversationOutput(
+    updates=[ExtractedField(field='price', value=MeasureValue(value=2400, unit='quintal'), confidence='high')],
+    reply='Is the wheat already harvested, or still in the field?',
+  )
+  mock_call = AsyncMock(return_value=normal_reply)
+
+  with patch('services.procurement.agent.get_llm_response', new=mock_call):
+    result = await conversation('2400 per quintal', state)
+
+  assert result['state'].qualification.is_decided() is True
+  assert result['done'] is False
+  assert mock_call.call_count == 1
+  assert result['reply'] == 'Is the wheat already harvested, or still in the field?'
+
+
+async def test_closes_once_everything_including_confidence_is_settled():
+  state = ConversationState()
+  state.claimed.crop.update('wheat', Confidence.HIGH, 1)
+  state.claimed.quantity.update(Measure(40, 'quintal'), Confidence.HIGH, 1)
+  state.claimed.crop_state.update(CropState.HARVESTED, Confidence.HIGH, 1)  # confirmed
+  state.claimed.location.update('Karnal', Confidence.HIGH, 1)
+
+  normal_reply = ConversationOutput(
+    updates=[ExtractedField(field='price', value=MeasureValue(value=2400, unit='quintal'), confidence='high')],
+    reply='pre-close reply',
+  )
+  closing_reply = ConversationOutput(updates=[], reply="We're interested — final price after grading.")
+  mock_call = AsyncMock(side_effect=[normal_reply, closing_reply])
+
+  with patch('services.procurement.agent.get_llm_response', new=mock_call):
+    result = await conversation('2400 per quintal', state)
+
+  assert result['done'] is True
+  assert mock_call.call_count == 2
+  assert result['reply'] == "We're interested — final price after grading."
+  assert result['state'].history[-1].content == "We're interested — final price after grading."
+
+
+async def test_unlisted_crop_declines_immediately_via_qualify():
+  fake = ConversationOutput(
+    updates=[ExtractedField(field='crop', value='paddy', confidence='high')],
+    reply='Got it, paddy.',
+  )
+  closing = ConversationOutput(updates=[], reply="We don't currently buy paddy, thanks for reaching out.")
+  with patch('services.procurement.agent.get_llm_response', new=AsyncMock(side_effect=[fake, closing])):
+    state = ConversationState()
+    result = await conversation('I have paddy to sell', state)
+
+  assert result['state'].qualification.verdict == Verdict.DECLINE
+  assert 'paddy' in result['state'].qualification.reason
+  assert result['done'] is True

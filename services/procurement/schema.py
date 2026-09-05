@@ -214,3 +214,28 @@ class ConversationState:
   qualification: Qualification = field(default_factory=Qualification)
   meta: ConversationMeta = field(default_factory=CallMeta)
   history: list[ConversationHistory] = field(default_factory=list)
+
+  def summary(self) -> str:
+    """
+    Compact view of the harness - watch the record fill/revise and the verdict emerge. Not to be used in production.
+    """
+    marks = {Confidence.UNKNOWN: '.', Confidence.LOW: '?', Confidence.HIGH: '!'}
+
+    lines = [f'  [{self.meta.channel.value}/{self.meta.initiated_by.value}] turn {self.meta.turn_count}', '  claimed:']
+
+    for name in ('crop', 'variety', 'quantity', 'grade', 'crop_state', 'location', 'price', 'payment_terms', 'handover', 'transport', 'contact'):
+      reading = getattr(self.claimed, name)
+
+      lines.append(f' {marks[reading.confidence]} {name}: {reading.value} ')
+
+    qualification = self.qualification
+    verdict_line = f' verdict: {qualification.verdict.value} '
+
+    if qualification.is_decided():
+      verdict_line += f' - {qualification.reason} '
+
+      if qualification.price:
+        verdict_line += f' (~{qualification.price.value} {qualification.price.unit})'
+
+    lines.append(verdict_line)
+    return '\n'.join(lines)

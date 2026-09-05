@@ -22,7 +22,7 @@ class Settings(BaseSettings):
     env_file='.env',
     env_file_encoding='utf-8',
     case_sensitive=True,
-    extra='ignore',  # ignore leftover env keys
+    extra='ignore',
   )
 
   # ── ENVIRONMENT ─────────────────────────────────────────────────────────────
@@ -40,6 +40,11 @@ class Settings(BaseSettings):
 
   # ── MODEL ──────────────────────────────────────────────
   PROCUREMENT_MODEL: str = 'gpt-4o'
+  OPENAI_API_KEY: str
+
+  # ── DOMAIN CONFIG ────────────────────────────────────────────────────────────────
+  CURRENCY: str = '₹'
+  WEIGHT: str = 'quintal'
 
   # ── COMPUTED ────────────────────────────────────────────────────────────────
   @computed_field

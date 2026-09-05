@@ -50,7 +50,7 @@ def qualify(record: ClaimedRecord, refdata: dict) -> Qualification:
   ceiling = reference_price * (1 + negotiable_margin_pct / 100)
 
   ask_price = record.price.value
-  target = Measure(reference_price, crop_defaults.get('price_unit'))
+  target = Measure(reference_price, ask_price.unit if ask_price else crop_defaults.get('price_unit'))
 
   if ask_price is None or ask_price.value is None:
     qualification.decide(Verdict.INCOMPLETE, 'No asking price stated.')

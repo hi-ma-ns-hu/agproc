@@ -5,34 +5,15 @@ from shared import LLMCallFailed, get_llm_response, get_logger
 
 from .contract import ConversationOutput
 from .extraction import apply_updates
-from .prompt import build_system_prompt
+from .prompt import CLOSING_INSTRUCTION, build_system_prompt
 from .qualification import qualify
 from .refdata import crop_config as config
 from .refdata import load_refdata
 from .schema import ConversationHistory, ConversationState, Role
 from .tools import TOOLS
-from .validation import is_completed, is_done
+from .validation import is_completed, is_done, unconfirmed
 
 logger = get_logger(__name__)
-
-
-def _render_refdata(refdata: dict) -> str:
-  """Render refdata as plain text for the prompt."""
-  lines = list()
-  for crop, crop_config in refdata.get('crops', {}).items():
-    if 'grades' in crop_config:
-      grades = ', '.join(f'{g} (₹{p}/qtl)' for g, p in crop_config['grades'].items())
-      lines.append(f'- {crop}: graded - {grades}')
-    else:
-      lines.append(f'- {crop}: ₹{crop_config["price"]}/qtl (ungraded)')
-  return '\n'.join(lines)
-
-
-def _render_verdict(state: ConversationState) -> str:
-  """Render the current qualification as VERDICT/REASON/TARGET PRICE text."""
-  qualification = state.qualification
-  target_price = f'{qualification.price.value} {qualification.price.unit}' if qualification.price else 'Not applicable'
-  return f'VERDICT: {qualification.verdict.value}\nREASON: {qualification.reason}\nTARGET PRICE: {target_price}'
 
 
 def _execute_tool(name: str, args: dict, refdata: dict) -> str:
@@ -63,9 +44,13 @@ async def conversation(input: str, state: ConversationState, channel: str = 'voi
   """One turn of the conversation: extract, update memory, qualify and respond."""
   refdata = load_refdata()
   turn_num = state.meta.turn_count + 1
+  logger.info(f'Turn {turn_num} input: {input}')
 
-  verdict_context = _render_verdict(state) if state.qualification.is_decided() else ''
-  system_prompt = build_system_prompt(channel=channel, refdata_context=_render_refdata(refdata), verdict_context=verdict_context)
+  crop_value = state.claimed.crop.value
+  crop_config = config(crop_value, refdata) if crop_value else None
+
+  unconfirmed_fields = unconfirmed(state.claimed, crop_config) if crop_config else []
+  system_prompt = build_system_prompt(channel=channel, refdata=refdata, state=state, unconfirmed_fields=unconfirmed_fields)
 
   messages = [{'role': 'system', 'content': system_prompt}]
   messages += [{'role': history.role.value, 'content': history.content} for history in state.history]
@@ -86,7 +71,7 @@ async def conversation(input: str, state: ConversationState, channel: str = 'voi
   logger.info(f'Turn {turn_num} raw output: {output.model_dump_json()}')
 
   # apply extracted updates
-  updates = apply_updates(state.claimed, output.updates, turn_num)
+  updates = apply_updates(state.claimed, output.updates, turn_num, crop_config=crop_config)
   logger.info(f'Turn {turn_num} applied {updates}/{len(output.updates)} updates.')
 
   # update state history
@@ -94,15 +79,23 @@ async def conversation(input: str, state: ConversationState, channel: str = 'voi
   state.history.append(ConversationHistory(role=Role.ASSISTANT, content=output.reply))
   state.meta.turn_count = turn_num
 
-  # resolve crop
-  crop = state.claimed.crop.value
-  crop_config = config(crop, refdata) if crop else None
+  # qualify (re-resolve crop config: this turn's updates may have just supplied the crop)
+  crop_value = state.claimed.crop.value
+  crop_config = config(crop_value, refdata) if crop_value else None
 
-  # qualify
-  if crop_config is not None and not state.qualification.is_decided() and is_completed(state.claimed, crop_config):
+  qualified = False
+  if crop_value and not state.qualification.is_decided() and (crop_config is None or is_completed(state.claimed, crop_config)):
     state.qualification = qualify(state.claimed, refdata)
+    qualified = True
     logger.info(f'Turn {turn_num} qualified: {state.qualification.verdict} - {state.qualification.reason}')
 
-  done = crop_config is not None and is_done(state, crop_config)
+  done = state.qualification.is_decided() and (crop_config is None or is_done(state, crop_config))
+  if qualified and done:
+    closing_prompt = build_system_prompt(channel=channel, refdata=refdata, state=state) + CLOSING_INSTRUCTION
+    closing_messages = [{'role': 'system', 'content': closing_prompt}]
+    closing_messages += [{'role': history.role.value, 'content': history.content} for history in state.history]
+    closing_output = await get_llm_response(closing_messages, ConversationOutput, model=settings.PROCUREMENT_MODEL)
+    output = closing_output
+    state.history[-1] = ConversationHistory(role=Role.ASSISTANT, content=output.reply)
 
   return {'reply': output.reply, 'state': state, 'done': done}

@@ -1,3 +1,4 @@
+from services.procurement.unit import to_quintal_price, to_quintal_weight
 from shared import get_logger
 
 from .contract import ExtractedField, MeasureValue
@@ -16,11 +17,26 @@ def _validate_text(raw) -> str | None:
   return raw or None
 
 
-def _validate_measure(raw) -> Measure | None:
+def _validate_measure(raw, field: str) -> Measure | None:
   """Convert a MeasureValue into our Measure type."""
   if not isinstance(raw, MeasureValue):
     return None
-  return Measure(raw.value, raw.unit)
+
+  unit = (raw.unit or '').strip()
+  if field == 'price':
+    per_unit = unit.split('/', 1)[1] if '/' in unit else unit
+    if not per_unit:
+      return None
+    result = to_quintal_price(raw.value, per_unit)
+  else:
+    if not unit:
+      return None
+    result = to_quintal_weight(raw.value, unit)
+
+  if result is None:
+    return None
+  value, unit = result
+  return Measure(value, unit)
 
 
 def _validate_crop_state(raw) -> CropState | None:
@@ -33,19 +49,21 @@ def _validate_crop_state(raw) -> CropState | None:
     return None
 
 
-_VALIDATORS = {
-  'quantity': _validate_measure,
-  'price': _validate_measure,
-  'crop_state': _validate_crop_state,
-}
-
-
-def apply_update(record: ClaimedRecord, update: ExtractedField, turn: int) -> bool:
+def apply_update(record: ClaimedRecord, update: ExtractedField, turn: int, crop_config: dict | None = None) -> bool:
   """Validate and apply one extracted field update to the record."""
-  validator = _VALIDATORS.get(update.field, _validate_text)
-  value = validator(update.value)
+  if update.field == 'grade' and crop_config is not None and 'grades' not in crop_config:
+    logger.warning('Update rejected: grade not allowed for ungraded crop.')
+    return False
+
+  if update.field in ('quantity', 'price'):
+    value = _validate_measure(update.value, update.field)
+  elif update.field == 'crop_state':
+    value = _validate_crop_state(update.value)
+  else:
+    value = _validate_text(update.value)
+
   if value is None:
-    logger.warning('Update rejected: {update.field} -> {update.value} invalid.')
+    logger.warning(f'Update rejected: {update.field} -> {update.value} invalid.')
     return False
 
   field: Reading = getattr(record, update.field)
@@ -53,6 +71,6 @@ def apply_update(record: ClaimedRecord, update: ExtractedField, turn: int) -> bo
   return True
 
 
-def apply_updates(record: ClaimedRecord, updates: list[ExtractedField], turn: int) -> int:
+def apply_updates(record: ClaimedRecord, updates: list[ExtractedField], turn: int, crop_config: dict | None = None) -> int:
   """Apply a batch of updates, return how many were actually applied"""
-  return sum(apply_update(record, update, turn) for update in updates)
+  return sum(apply_update(record, update, turn, crop_config) for update in updates)

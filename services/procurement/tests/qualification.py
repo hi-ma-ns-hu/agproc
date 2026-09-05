@@ -1,5 +1,7 @@
 import pytest
 
+from ..contract import ExtractedField, MeasureValue
+from ..extraction import apply_update
 from ..qualification import qualify
 from ..schema import ClaimedRecord, Confidence, CropState, Measure, Verdict
 
@@ -151,3 +153,17 @@ def test_missing_price_is_incomplete():
 def test_every_verdict_has_a_reason(rec):
   q = qualify(rec, REFDATA)
   assert q.reason and q.reason.strip()
+
+
+def test_mismatched_units_are_canonicalized_before_reaching_qualify():
+  rec = ClaimedRecord()
+  apply_update(rec, ExtractedField(field='crop', value='wheat', confidence='high'), turn=1)
+  apply_update(rec, ExtractedField(field='quantity', value=MeasureValue(value=50, unit='quintal'), confidence='high'), turn=1)
+  apply_update(rec, ExtractedField(field='crop_state', value='harvested', confidence='high'), turn=1)
+  apply_update(rec, ExtractedField(field='location', value='Karnal', confidence='high'), turn=1)
+  apply_update(rec, ExtractedField(field='price', value=MeasureValue(value=25, unit='kg'), confidence='high'), turn=1)
+
+  assert rec.price.value.unit == '₹/quintal'
+  assert rec.price.value.value == 2500.0
+  q = qualify(rec, REFDATA)
+  assert q.verdict is Verdict.DECLINE
