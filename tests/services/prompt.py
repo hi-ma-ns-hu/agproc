@@ -1,4 +1,4 @@
-from services import CLOSING_INSTRUCTION, ConversationState, Measure, Verdict, _render_refdata, _render_verdict, build_system_prompt
+from services import CLOSING_INSTRUCTION, ConversationState, Measure, Verdict, build_system_prompt, render_refdata, render_verdict
 
 EMPTY_REFDATA: dict = {}
 
@@ -83,20 +83,20 @@ def test_prompt_has_price_measure_example():
 
 def test_render_refdata_graded_crop():
   refdata = {'crops': {'onion': {'grades': {'mota': 2000}}}}
-  text = _render_refdata(refdata)
+  text = render_refdata(refdata)
   assert 'onion' in text and 'mota' in text and '2000' in text
 
 
 def test_render_refdata_ungraded_crop():
   refdata = {'crops': {'wheat': {'price': 2450}}}
-  text = _render_refdata(refdata)
+  text = render_refdata(refdata)
   assert 'wheat' in text and '2450' in text and 'ungraded' in text
 
 
 def test_render_verdict_includes_target_price():
   state = ConversationState()
   state.qualification.decide(Verdict.NEGOTIATE, 'in band', price=Measure(2450, '₹/quintal'))
-  text = _render_verdict(state)
+  text = render_verdict(state)
   assert 'negotiate' in text.lower()
   assert '2450' in text
 
@@ -106,7 +106,7 @@ def test_render_refdata_uses_default_price_unit():
     'defaults': {'price_unit': '₹/quintal'},
     'crops': {'wheat': {'price': 2450}},
   }
-  text = _render_refdata(refdata)
+  text = render_refdata(refdata)
   assert '₹/quintal' in text
 
 
@@ -115,7 +115,7 @@ def test_render_refdata_uses_crop_specific_price_unit_override():
     'defaults': {'price_unit': '₹/quintal'},
     'crops': {'onion': {'grades': {'mota': 2000}, 'price_unit': '₹/kg'}},
   }
-  text = _render_refdata(refdata)
+  text = render_refdata(refdata)
   assert '₹/kg' in text
   assert '₹/quintal' not in text
 
@@ -125,7 +125,7 @@ def test_render_refdata_graded_crop_shows_per_grade_prices_with_unit():
     'defaults': {'price_unit': '₹/quintal'},
     'crops': {'onion': {'grades': {'super': 2200, 'mota': 2000}}},
   }
-  text = _render_refdata(refdata)
+  text = render_refdata(refdata)
   assert 'super' in text and '2200' in text
   assert 'mota' in text and '2000' in text
   assert '₹/quintal' in text

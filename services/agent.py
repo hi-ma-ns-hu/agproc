@@ -71,13 +71,14 @@ async def conversation(input: str, state: ConversationState, channel: str = 'voi
   logger.info(f'Turn {turn_num} raw output: {output.model_dump_json()}')
 
   # apply extracted updates
-  updates = apply_updates(state.claimed, output.updates, turn_num, crop_config=crop_config)
-  logger.info(f'Turn {turn_num} applied {updates}/{len(output.updates)} updates.')
+  updates, rejected_fields = apply_updates(state.claimed, output.updates, turn_num, crop_config=crop_config)
+  logger.info(f'Turn {turn_num} applied {updates}/{len(output.updates)} updates, rejected: {rejected_fields}')
 
   # update state history
   state.history.append(ConversationHistory(role=Role.USER, content=input))
   state.history.append(ConversationHistory(role=Role.ASSISTANT, content=output.reply))
   state.meta.turn_count = turn_num
+  state.rejected_fields = rejected_fields
 
   # qualify (re-resolve crop config: this turn's updates may have just supplied the crop)
   crop_value = state.claimed.crop.value

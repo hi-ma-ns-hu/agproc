@@ -1,7 +1,7 @@
 from .agent import conversation
 from .contract import ConversationOutput, ExtractedField, MeasureValue
 from .extraction import apply_update, apply_updates
-from .prompt import CLOSING_INSTRUCTION, _render_refdata, _render_verdict, build_system_prompt
+from .prompt import CLOSING_INSTRUCTION, build_system_prompt, render_refdata, render_rejected, render_verdict
 from .qualification import qualify
 from .refdata import clear_refdata, crop_config, load_refdata
 from .schema import (
@@ -34,8 +34,9 @@ __all__ = [
   'Reading',
   'Role',
   'Verdict',
-  '_render_refdata',
-  '_render_verdict',
+  'render_refdata',
+  'render_verdict',
+  'render_rejected',
   'apply_update',
   'apply_updates',
   'build_system_prompt',

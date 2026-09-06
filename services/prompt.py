@@ -43,6 +43,9 @@ TERMS (negotiable, discussed but not disqualifying):
 ## Outstanding confirmations
 {unconfirmed_context}
 
+## Values that need re-stating
+{rejected_context}
+
 ## When a decision has been reached
 If a VERDICT is given below, the decision is already made — do not change it, hedge it, or imply something different. Convey it naturally and warmly, in your own words, but the facts must match exactly:
 
@@ -85,7 +88,7 @@ All the information needed has been gathered and a decision has been reached (se
 """
 
 
-def _render_refdata(refdata: dict) -> str:
+def render_refdata(refdata: dict) -> str:
   defaults = refdata.get('defaults', {})
   default_unit = defaults.get('price_unit', '')
   lines = []
@@ -99,7 +102,7 @@ def _render_refdata(refdata: dict) -> str:
   return '\n'.join(lines)
 
 
-def _render_verdict(state: ConversationState) -> str:
+def render_verdict(state: ConversationState) -> str:
   """Render the current qualification as VERDICT/REASON/TARGET PRICE text."""
   qualification = state.qualification
   target_price = f'{qualification.price.value} {qualification.price.unit}' if qualification.price else 'Not applicable'
@@ -112,14 +115,28 @@ def _render_unconfirmed(fields: list[str]) -> str:
   return f"These fields were stated but are UNCLEAR and must be confirmed before the call can be considered complete: {', '.join(fields)}. Prioritize confirming these before anything else, even if you've already asked about them once — do not let the conversation drift toward closing while these remain unresolved.\n\nTo confirm a LOW-confidence field, you must ASK THE FARMER a direct question about it and wait for their answer. Do NOT simply re-state or upgrade a field's confidence in your own output without the farmer having actually said something new that confirms it. Confidence can only become HIGH in response to something the farmer explicitly said this turn or a prior turn — never based on your own assertion or the passage of time."
 
 
+def render_rejected(rejected: list[tuple[str, str]]) -> str:
+  if not rejected:
+    return '(none)'
+  field, reason = rejected[0]
+  others = ', '.join(f for f, _ in rejected[1:])
+  tail = f' The same applies to: {others}.' if others else ''
+  return (
+    f"IMPORTANT: the farmer's last answer for {field} could NOT be recorded — {reason} This OVERRIDES the \"don't ask again\" rule above for this field only.{tail}\n"
+    f'Your `reply` text this turn MUST contain an actual question asking the farmer to restate {field} in a way you can record (e.g. state the exact number and a real unit like kg, quintal, or tonne — not a container like "bags" or "sacks").\n'
+    f"Do NOT put {field} in `updates` again unless the farmer states a genuinely new, valid value THIS turn — do not resubmit the old rejected value, and do not silently accept or acknowledge it as if it were fine. Do not move on to any other field until {field} is resolved."
+  )
+
+
 def build_system_prompt(channel: str, refdata: dict, state: ConversationState, unconfirmed_fields: list[str] | None = None) -> str:
   """
   Fill the template for one call.
   """
-  verdict_context = _render_verdict(state) if state.qualification.is_decided() else ''
+  verdict_context = render_verdict(state) if state.qualification.is_decided() else ''
   return SYSTEM_PROMPT_TEMPLATE.format(
     channel_context=CHANNEL_CONTEXT[channel],
-    refdata_context=_render_refdata(refdata),
+    refdata_context=render_refdata(refdata),
     verdict_context=verdict_context or '(no decision yet — continue gathering information)',
     unconfirmed_context=_render_unconfirmed(unconfirmed_fields or []),
+    rejected_context=render_rejected(state.rejected_fields or []),
   )

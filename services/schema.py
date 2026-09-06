@@ -214,6 +214,7 @@ class ConversationState:
   qualification: Qualification = field(default_factory=Qualification)
   meta: ConversationMeta = field(default_factory=CallMeta)
   history: list[ConversationHistory] = field(default_factory=list)
+  rejected_fields: list[str] = field(default_factory=list)
 
   def summary(self) -> str:
     """

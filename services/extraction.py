@@ -49,28 +49,41 @@ def _validate_crop_state(raw) -> CropState | None:
     return None
 
 
-def apply_update(record: ClaimedRecord, update: ExtractedField, turn: int, crop_config: dict | None = None) -> bool:
+def apply_update(record: ClaimedRecord, update: ExtractedField, turn: int, crop_config: dict | None = None) -> tuple[bool, str | None]:
   """Validate and apply one extracted field update to the record."""
   if update.field == 'grade' and crop_config is not None and 'grades' not in crop_config:
     logger.warning('Update rejected: grade not allowed for ungraded crop.')
-    return False
+    return False, 'Grade not allowed for ungraded crop'
 
   if update.field in ('quantity', 'price'):
     value = _validate_measure(update.value, update.field)
+    if value is None:
+      reason = 'The unit is not recognized or not supported.'
   elif update.field == 'crop_state':
     value = _validate_crop_state(update.value)
+    if value is None:
+      reason = 'The crop state is not recognized or not supported. Valid states are: Harvested, Harvesting, or Standing.'
   else:
     value = _validate_text(update.value)
+    if value is None:
+      reason = 'The value is empty or None.'
 
   if value is None:
     logger.warning(f'Update rejected: {update.field} -> {update.value} invalid.')
-    return False
+    return False, reason
 
   field: Reading = getattr(record, update.field)
   field.update(value, _CONFIDENCE[update.confidence], turn)
-  return True
+  return True, None
 
 
-def apply_updates(record: ClaimedRecord, updates: list[ExtractedField], turn: int, crop_config: dict | None = None) -> int:
-  """Apply a batch of updates, return how many were actually applied"""
-  return sum(apply_update(record, update, turn, crop_config) for update in updates)
+def apply_updates(record: ClaimedRecord, updates: list[ExtractedField], turn: int, crop_config: dict | None = None) -> tuple[int, list[str]]:
+  """Apply a batch of updates, return (count_applied, rejected_field_names) so that the caller can reask the model about the rejected fields."""
+  applied, rejected = 0, []
+  for update in updates:
+    ok, reason = apply_update(record, update, turn, crop_config)
+    if ok:
+      applied += 1
+    else:
+      rejected.append((update.field, reason))
+  return applied, rejected
