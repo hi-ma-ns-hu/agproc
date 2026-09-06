@@ -1,7 +1,6 @@
 import pytest
 
-from ..schema import ClaimedRecord, Confidence, ConversationState, CropState, Measure, Verdict
-from ..validation import is_completed, is_done, missing, required_fields, unconfirmed
+from services import ClaimedRecord, Confidence, ConversationState, CropState, Measure, Verdict, is_completed, is_done, missing, required_fields, unconfirmed
 
 WHEAT_CONFIG = {'price': 2450, 'min_quantity': 20}
 ONION_CONFIG = {

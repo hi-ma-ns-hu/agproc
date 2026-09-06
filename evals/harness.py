@@ -1,7 +1,6 @@
 import asyncio
 
-from ..agent import conversation
-from ..schema import ConversationState
+from services import ConversationState, conversation
 
 
 async def run():

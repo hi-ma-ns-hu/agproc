@@ -1,7 +1,7 @@
 import json
 
 from config import settings
-from shared import LLMCallFailed, get_llm_response, get_logger
+from utils import LLMCallFailed, get_llm_response, get_logger
 
 from .contract import ConversationOutput
 from .extraction import apply_updates

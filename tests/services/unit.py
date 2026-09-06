@@ -1,6 +1,4 @@
-# services/procurement/tests/test_units.py
-
-from services.procurement.unit import to_quintal_price, to_quintal_weight
+from services import to_quintal_price, to_quintal_weight
 
 
 def test_kg_converts_to_quintal():
@@ -12,6 +10,7 @@ def test_kg_converts_to_quintal():
 def test_quintal_stays_quintal():
   amount, unit = to_quintal_weight(50, 'quintal')
   assert amount == 50.0
+  assert unit == 'quintal'
 
 
 def test_tonne_converts_to_quintal():

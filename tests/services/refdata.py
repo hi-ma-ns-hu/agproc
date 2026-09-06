@@ -1,4 +1,4 @@
-from ..refdata import clear_refdata, crop_config, load_refdata
+from services import clear_refdata, crop_config, load_refdata
 
 
 def test_load_refdata_returns_dict():

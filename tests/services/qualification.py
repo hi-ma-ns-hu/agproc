@@ -1,9 +1,6 @@
 import pytest
 
-from ..contract import ExtractedField, MeasureValue
-from ..extraction import apply_update
-from ..qualification import qualify
-from ..schema import ClaimedRecord, Confidence, CropState, Measure, Verdict
+from services import ClaimedRecord, Confidence, CropState, ExtractedField, Measure, MeasureValue, Verdict, apply_update, qualify
 
 REFDATA = {
   'defaults': {

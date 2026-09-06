@@ -1,22 +1,3 @@
-"""
-shared/logging/__init__.py — Structured JSON logging for all services.
-
-Every log line is emitted as a JSON object so dashboards can index and
-query individual fields — workspace_id, trace_id, duration_ms, etc.
-
-Usage:
-  from shared.logging import get_logger, bind_context, clear_context
-
-  logger = get_logger(__name__)
-  logger.info("Question answered", extra={"confidence": 0.87})
-
-Context binding (attach fields to every log line in a request):
-  bind_context(trace_id="abc123", workspace_id=str(workspace_id))
-  logger.info("Starting pipeline")   # trace_id and workspace_id auto-included
-  clear_context()                    # called in middleware after response
-
-"""
-
 from __future__ import annotations
 
 import json

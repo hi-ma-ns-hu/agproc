@@ -1,5 +1,4 @@
-from ..prompt import CLOSING_INSTRUCTION, _render_refdata, _render_verdict, build_system_prompt
-from ..schema import ConversationState, Measure, Verdict
+from services import CLOSING_INSTRUCTION, ConversationState, Measure, Verdict, _render_refdata, _render_verdict, build_system_prompt
 
 EMPTY_REFDATA: dict = {}
 

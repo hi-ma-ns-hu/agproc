@@ -12,7 +12,7 @@ from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 from sqlalchemy import text
 
 from config import settings
-from shared import REDIS_ENABLED, bind_context, clear_context, configure_logging, engine, get_logger, init_tracing, redis
+from utils import REDIS_ENABLED, bind_context, clear_context, configure_logging, engine, get_logger, init_tracing, redis
 
 # configure logging and tracing once at startup, before any traced client is used
 configure_logging()

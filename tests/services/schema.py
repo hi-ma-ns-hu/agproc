@@ -1,6 +1,6 @@
 import pytest
 
-from ..schema import Confidence, Measure, Qualification, Reading, Verdict
+from services import Confidence, Measure, Qualification, Reading, Verdict
 
 # Reading: Provenance
 

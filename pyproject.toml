@@ -14,6 +14,6 @@ select = ["E", "W", "F", "I", "UP", "B"]
 quote-style = "single"
 
 [tool.pytest.ini_options]
-testpaths = ["services", "shared"]
+testpaths = ["tests"]
 python_files = ["tests/*.py"]
 asyncio_mode = 'auto'

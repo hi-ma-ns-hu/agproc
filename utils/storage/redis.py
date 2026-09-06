@@ -1,27 +1,3 @@
-"""
-shared/storage/redis.py — Shared async Redis pool.
-
-Initialized once at module load, closed on app shutdown.
-Never call Redis.from_url() elsewhere — import from here instead.
-
-`redis` is always a usable object, never None — when REDIS_URL is unset it's a
-no-op stand-in instead of a real client, so callers don't need to check for
-None before every call:
-
-  from shared.storage import redis
-  await redis.set("key", "value")   # no-op when disabled
-  await redis.get("key")            # None when disabled — same as a cache miss
-
-Usage in FastAPI route handlers (via Depends):
-  from shared.storage import RedisClient
-  @router.get("/example")
-  async def example(r: RedisClient):
-    await r.set("key", "value")
-
-Use REDIS_ENABLED where "disabled" needs to be distinguished from a real
-cache miss or error — e.g. health checks.
-"""
-
 from __future__ import annotations
 
 from collections.abc import AsyncGenerator

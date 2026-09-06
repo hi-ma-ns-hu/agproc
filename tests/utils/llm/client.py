@@ -4,7 +4,7 @@ import pytest
 from openai import APITimeoutError, RateLimitError
 from pydantic import BaseModel
 
-from ..client import LLMCallFailed, get_llm_response
+from utils import LLMCallFailed, get_llm_response
 
 
 class DummyOutput(BaseModel):
@@ -27,7 +27,7 @@ def _fake_response(parsed):
 async def test_succeeds_on_first_attempt_no_retry_needed():
   fake_client = AsyncMock()
   fake_client.beta.chat.completions.parse = AsyncMock(return_value=_fake_response(DummyOutput(reply='hi')))
-  with patch('shared.llm.client.get_llm_client', return_value=fake_client):
+  with patch('utils.llm.client.get_llm_client', return_value=fake_client):
     result = await get_llm_response([{'role': 'user', 'content': 'hi'}], DummyOutput)
 
   assert result.reply == 'hi'
@@ -42,7 +42,7 @@ async def test_retries_after_transient_error_then_succeeds():
       _fake_response(DummyOutput(reply='recovered')),  # succeeds on retry
     ]
   )
-  with patch('shared.llm.client.get_llm_client', return_value=fake_client):
+  with patch('utils.llm.client.get_llm_client', return_value=fake_client):
     with patch('asyncio.sleep', new=AsyncMock()):  # skip real backoff delay in tests
       result = await get_llm_response([{'role': 'user', 'content': 'hi'}], DummyOutput)
 
@@ -53,7 +53,7 @@ async def test_retries_after_transient_error_then_succeeds():
 async def test_raises_llm_call_failed_after_exhausting_retries():
   fake_client = AsyncMock()
   fake_client.beta.chat.completions.parse = AsyncMock(side_effect=RateLimitError(message='rate limited', response=MagicMock(), body=None))
-  with patch('shared.llm.client.get_llm_client', return_value=fake_client):
+  with patch('utils.llm.client.get_llm_client', return_value=fake_client):
     with patch('asyncio.sleep', new=AsyncMock()):
       with pytest.raises(LLMCallFailed):
         await get_llm_response([{'role': 'user', 'content': 'hi'}], DummyOutput, max_retries=2)
@@ -71,7 +71,7 @@ async def test_retries_on_empty_parsed_response():
       _fake_response(DummyOutput(reply='ok now')),  # good second attempt
     ]
   )
-  with patch('shared.llm.client.get_llm_client', return_value=fake_client):
+  with patch('utils.llm.client.get_llm_client', return_value=fake_client):
     with patch('asyncio.sleep', new=AsyncMock()):
       result = await get_llm_response([{'role': 'user', 'content': 'hi'}], DummyOutput)
 
@@ -87,7 +87,7 @@ async def test_backoff_is_called_between_retries():
       _fake_response(DummyOutput(reply='ok')),
     ]
   )
-  with patch('shared.llm.client.get_llm_client', return_value=fake_client):
+  with patch('utils.llm.client.get_llm_client', return_value=fake_client):
     with patch('asyncio.sleep', new=AsyncMock()) as mock_sleep:
       await get_llm_response([{'role': 'user', 'content': 'hi'}], DummyOutput)
 
@@ -97,7 +97,7 @@ async def test_backoff_is_called_between_retries():
 async def test_tools_param_omitted_when_none_given():
   fake_client = AsyncMock()
   fake_client.beta.chat.completions.parse = AsyncMock(return_value=_fake_response(DummyOutput(reply='hi')))
-  with patch('shared.llm.client.get_llm_client', return_value=fake_client):
+  with patch('utils.llm.client.get_llm_client', return_value=fake_client):
     await get_llm_response([{'role': 'user', 'content': 'hi'}], DummyOutput, tools=None)
 
   call_kwargs = fake_client.beta.chat.completions.parse.call_args.kwargs

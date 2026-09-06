@@ -1,6 +1,4 @@
-from ..contract import ExtractedField, MeasureValue
-from ..extraction import apply_update, apply_updates
-from ..schema import ClaimedRecord, Confidence, CropState, Measure
+from services import ClaimedRecord, Confidence, CropState, ExtractedField, Measure, MeasureValue, apply_update, apply_updates
 
 
 # ---------- apply_update: text fields (default validator) ----------

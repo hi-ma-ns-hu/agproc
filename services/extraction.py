@@ -1,8 +1,8 @@
-from services.procurement.unit import to_quintal_price, to_quintal_weight
-from shared import get_logger
+from utils import get_logger
 
 from .contract import ExtractedField, MeasureValue
 from .schema import ClaimedRecord, Confidence, CropState, Measure, Reading
+from .unit import to_quintal_price, to_quintal_weight
 
 logger = get_logger(__name__)
 
