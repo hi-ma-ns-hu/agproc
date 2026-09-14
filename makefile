@@ -6,7 +6,7 @@ install:
 
 # run the API locally with autoreload
 dev:
-	uvicorn app:app --port 7000 --reload
+	uvicorn app:app --port 5000 --reload
 
 # check for lint errors
 lint:

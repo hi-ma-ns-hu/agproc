@@ -12,6 +12,7 @@ from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 from sqlalchemy import text
 
 from config import settings
+from routers import router
 from utils import REDIS_ENABLED, bind_context, clear_context, configure_logging, engine, get_logger, init_tracing, redis
 
 # configure logging and tracing once at startup, before any traced client is used
@@ -96,8 +97,8 @@ def _add_health_routes(app: FastAPI) -> None:
     )
 
 
-# def _add_api_routes(app: FastAPI) -> None:
-#   app.include_router(router)
+def _add_api_routes(app: FastAPI) -> None:
+  app.include_router(router, prefix='/api')
 
 
 def _add_trace_middleware(app: FastAPI) -> None:
@@ -121,10 +122,11 @@ def _add_trace_middleware(app: FastAPI) -> None:
 
 # app factory
 def create_app() -> FastAPI:
-  app = FastAPI(title='AgProc', version='0.1.0', lifespan=lifespan, root_path='/api', docs_url='/docs' if settings.IS_DEVELOPMENT else None, redoc_url=None)
+  app = FastAPI(title='AgProc', version='0.1.0', lifespan=lifespan, docs_url='/docs' if settings.IS_DEVELOPMENT else None, redoc_url=None)
   FastAPIInstrumentor.instrument_app(app)
   _add_trace_middleware(app)
   _add_health_routes(app)
+  _add_api_routes(app)
   return app
 
 

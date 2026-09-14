@@ -18,6 +18,7 @@ from .schema import (
 from .tools import TOOLS
 from .unit import to_quintal_price, to_quintal_weight
 from .validation import is_completed, is_done, missing, required_fields, unconfirmed
+from .voice import run_conversation_pipeline
 
 __all__ = [
   'TOOLS',
@@ -52,4 +53,5 @@ __all__ = [
   'to_quintal_price',
   'to_quintal_weight',
   'unconfirmed',
+  'run_conversation_pipeline',
 ]

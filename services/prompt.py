@@ -1,4 +1,4 @@
-from .schema import ConversationState
+from .schema import ConversationInitiator, ConversationState
 
 CHANNEL_CONTEXT = {
   'voice': ('You are on a phone call with a farmer. Keep responses short and conversational, since this is spoken aloud, not read.'),
@@ -121,22 +121,18 @@ def render_rejected(rejected: list[tuple[str, str]]) -> str:
   field, reason = rejected[0]
   others = ', '.join(f for f, _ in rejected[1:])
   tail = f' The same applies to: {others}.' if others else ''
-  return (
-    f"IMPORTANT: the farmer's last answer for {field} could NOT be recorded — {reason} This OVERRIDES the \"don't ask again\" rule above for this field only.{tail}\n"
-    f'Your `reply` text this turn MUST contain an actual question asking the farmer to restate {field} in a way you can record (e.g. state the exact number and a real unit like kg, quintal, or tonne — not a container like "bags" or "sacks").\n'
-    f"Do NOT put {field} in `updates` again unless the farmer states a genuinely new, valid value THIS turn — do not resubmit the old rejected value, and do not silently accept or acknowledge it as if it were fine. Do not move on to any other field until {field} is resolved."
-  )
+  return f'IMPORTANT: the farmer\'s last answer for {field} could NOT be recorded — {reason} This OVERRIDES the "don\'t ask again" rule above for this field only.{tail}\nYour `reply` text this turn MUST contain an actual question asking the farmer to restate {field} in a way you can record (e.g. state the exact number and a real unit like kg, quintal, or tonne — not a container like "bags" or "sacks").\nDo NOT put {field} in `updates` again unless the farmer states a genuinely new, valid value THIS turn — do not resubmit the old rejected value, and do not silently accept or acknowledge it as if it were fine. Do not move on to any other field until {field} is resolved.'
 
 
-def build_system_prompt(channel: str, refdata: dict, state: ConversationState, unconfirmed_fields: list[str] | None = None) -> str:
+def render_opening(initiated_by: str, is_opening_turn: bool) -> str:
+  if is_opening_turn and initiated_by == ConversationInitiator.US:
+    return "This is the very first thing you say — the farmer has not spoken yet. Open with a brief, friendly greeting: who you are, that you're calling about produce they may have to sell. Keep it short."
+  return '(not the opening turn — respond normally to what the farmer said)'
+
+
+def build_system_prompt(channel: str, refdata: dict, state: ConversationState, unconfirmed_fields: list[str] | None = None, is_opening_turn: bool = False) -> str:
   """
   Fill the template for one call.
   """
   verdict_context = render_verdict(state) if state.qualification.is_decided() else ''
-  return SYSTEM_PROMPT_TEMPLATE.format(
-    channel_context=CHANNEL_CONTEXT[channel],
-    refdata_context=render_refdata(refdata),
-    verdict_context=verdict_context or '(no decision yet — continue gathering information)',
-    unconfirmed_context=_render_unconfirmed(unconfirmed_fields or []),
-    rejected_context=render_rejected(state.rejected_fields or []),
-  )
+  return SYSTEM_PROMPT_TEMPLATE.format(channel_context=CHANNEL_CONTEXT[channel], refdata_context=render_refdata(refdata), verdict_context=verdict_context or '(no decision yet — continue gathering information)', unconfirmed_context=_render_unconfirmed(unconfirmed_fields or []), rejected_context=render_rejected(state.rejected_fields or []), opening_context=render_opening(state.meta.initiated_by.value, is_opening_turn))

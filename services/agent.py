@@ -40,7 +40,7 @@ async def _resolve_tool_calls(message, messages: list[dict], refdata: dict, stat
   return result
 
 
-async def conversation(input: str, state: ConversationState, channel: str = 'voice') -> dict:
+async def conversation(input: str, state: ConversationState, channel: str = 'voice', is_opening_turn: bool = False) -> dict:
   """One turn of the conversation: extract, update memory, qualify and respond."""
   refdata = load_refdata()
   turn_num = state.meta.turn_count + 1
@@ -50,7 +50,7 @@ async def conversation(input: str, state: ConversationState, channel: str = 'voi
   crop_config = config(crop_value, refdata) if crop_value else None
 
   unconfirmed_fields = unconfirmed(state.claimed, crop_config) if crop_config else []
-  system_prompt = build_system_prompt(channel=channel, refdata=refdata, state=state, unconfirmed_fields=unconfirmed_fields)
+  system_prompt = build_system_prompt(channel=channel, refdata=refdata, state=state, unconfirmed_fields=unconfirmed_fields, is_opening_turn=is_opening_turn)
 
   messages = [{'role': 'system', 'content': system_prompt}]
   messages += [{'role': history.role.value, 'content': history.content} for history in state.history]

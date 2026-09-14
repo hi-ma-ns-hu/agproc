@@ -29,10 +29,8 @@ class Settings(BaseSettings):
   APP_ENV: Literal['DEVELOPMENT', 'STAGING', 'PRODUCTION'] = 'DEVELOPMENT'
   LOG_LEVEL: Literal['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'] = 'INFO'
 
-  # ── CACHE (Redis) ───────────────────────────────────────────────────────────
+  # ── STORAGE (Redis) ───────────────────────────────────────────────────────────
   REDIS_URL: str = ''
-
-  # ── DATABASE ────────────────────────────────────────────────────
   DATABASE_URL: str
 
   # ── TRACING ──────────────────────────────────────────────
@@ -41,6 +39,14 @@ class Settings(BaseSettings):
   # ── MODEL ──────────────────────────────────────────────
   PROCUREMENT_MODEL: str = 'gpt-4o'
   OPENAI_API_KEY: str
+  STT_MODEL: str = 'saaras:v3'
+  TTS_MODEL: str = 'bulbul:v3'
+  VOICE_LANGUAGE: str = 'hi-IN'
+  SARVAM_API_KEY: str
+
+  # ── COMMUNICATION ──────────────────────────────────────────────
+  TWILIO_ACCOUNT_SID: str
+  TWILIO_AUTH_TOKEN: str
 
   # ── DOMAIN CONFIG ────────────────────────────────────────────────────────────────
   CURRENCY: str = '₹'

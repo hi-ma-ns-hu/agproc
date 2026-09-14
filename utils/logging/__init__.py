@@ -139,6 +139,8 @@ def configure_logging() -> None:
   logging.getLogger('httpcore').setLevel(logging.WARNING)
   logging.getLogger('uvicorn.access').setLevel(logging.WARNING)
   logging.getLogger('celery').setLevel(logging.INFO)
+  # uncomment it later when metric compatible aggregators are integrated
+  logging.getLogger('opentelemetry.exporter.otlp.proto.http.metric_exporter').setLevel(logging.CRITICAL)
 
 
 # ── Convenience wrapper ───────────────────────────────────────────────────────
