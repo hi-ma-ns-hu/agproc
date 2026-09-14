@@ -1,4 +1,6 @@
+from config import settings
 from .schema import ConversationInitiator, ConversationState
+from .voice import LANGUAGE_NAMES, VoiceLanguage
 
 CHANNEL_CONTEXT = {
   'voice': ('You are on a phone call with a farmer. Keep responses short and conversational, since this is spoken aloud, not read.'),
@@ -6,7 +8,7 @@ CHANNEL_CONTEXT = {
 }
 
 SYSTEM_PROMPT_TEMPLATE = """
-You are a procurement agent for a produce buying operation. {channel_context}
+You are a procurement agent for a produce buying operation. {channel_context} {language_context}
 
 ## Your goal
 Have a natural conversation to learn about a lot of produce the farmer may be selling, and gather enough detail for us to decide whether it's worth pursuing.
@@ -130,9 +132,19 @@ def render_opening(initiated_by: str, is_opening_turn: bool) -> str:
   return '(not the opening turn — respond normally to what the farmer said)'
 
 
+def render_language_instruction(voice_language: VoiceLanguage) -> str:
+  language_name = LANGUAGE_NAMES[voice_language]
+  return (
+    f'Always respond in {language_name}, regardless of what language or script the farmer '
+    f"uses. Even if the farmer's words come through unclear or in another language due to "
+    f'transcription, continue the conversation in {language_name}.'
+  )
+
+
 def build_system_prompt(channel: str, refdata: dict, state: ConversationState, unconfirmed_fields: list[str] | None = None, is_opening_turn: bool = False) -> str:
   """
   Fill the template for one call.
   """
   verdict_context = render_verdict(state) if state.qualification.is_decided() else ''
-  return SYSTEM_PROMPT_TEMPLATE.format(channel_context=CHANNEL_CONTEXT[channel], refdata_context=render_refdata(refdata), verdict_context=verdict_context or '(no decision yet — continue gathering information)', unconfirmed_context=_render_unconfirmed(unconfirmed_fields or []), rejected_context=render_rejected(state.rejected_fields or []), opening_context=render_opening(state.meta.initiated_by.value, is_opening_turn))
+  language_context = render_language_instruction(VoiceLanguage(settings.VOICE_LANGUAGE)) if channel == 'voice' else ''
+  return SYSTEM_PROMPT_TEMPLATE.format(channel_context=CHANNEL_CONTEXT[channel], language_context=language_context, refdata_context=render_refdata(refdata), verdict_context=verdict_context or '(no decision yet — continue gathering information)', unconfirmed_context=_render_unconfirmed(unconfirmed_fields or []), rejected_context=render_rejected(state.rejected_fields or []), opening_context=render_opening(state.meta.initiated_by.value, is_opening_turn))
