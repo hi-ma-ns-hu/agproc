@@ -1,4 +1,4 @@
-from .agent import conversation
+from .agent import build_conversation_state, conversation
 from .contract import ConversationOutput, ExtractedField, MeasureValue
 from .extraction import apply_update, apply_updates
 from .prompt import CLOSING_INSTRUCTION, build_system_prompt, render_refdata, render_rejected, render_verdict
@@ -40,6 +40,7 @@ __all__ = [
   'render_rejected',
   'apply_update',
   'apply_updates',
+  'build_conversation_state',
   'build_system_prompt',
   'clear_refdata',
   'conversation',

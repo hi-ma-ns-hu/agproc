@@ -9,11 +9,18 @@ from .prompt import CLOSING_INSTRUCTION, build_system_prompt
 from .qualification import qualify
 from .refdata import crop_config as config
 from .refdata import load_refdata
-from .schema import ConversationHistory, ConversationState, Role
+from .schema import ConversationHistory, ConversationInitiator, ConversationState, Role
 from .tools import TOOLS
 from .validation import is_completed, is_done, unconfirmed
 
 logger = get_logger(__name__)
+
+
+def build_conversation_state(direction: str) -> ConversationState:
+  """Build the initial state for one call, given who initiated it ('inbound' or 'outbound')."""
+  state = ConversationState()
+  state.meta.initiated_by = ConversationInitiator.US if direction == 'outbound' else ConversationInitiator.THEM
+  return state
 
 
 def _execute_tool(name: str, args: dict, refdata: dict) -> str:
