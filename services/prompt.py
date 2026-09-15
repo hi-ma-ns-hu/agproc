@@ -1,4 +1,5 @@
 from config import settings
+
 from .schema import ConversationInitiator, ConversationState
 from .voice import LANGUAGE_NAMES, VoiceLanguage
 
@@ -134,11 +135,7 @@ def render_opening(initiated_by: str, is_opening_turn: bool) -> str:
 
 def render_language_instruction(voice_language: VoiceLanguage) -> str:
   language_name = LANGUAGE_NAMES[voice_language]
-  return (
-    f'Always respond in {language_name}, regardless of what language or script the farmer '
-    f"uses. Even if the farmer's words come through unclear or in another language due to "
-    f'transcription, continue the conversation in {language_name}.'
-  )
+  return f"Always respond in {language_name}, regardless of what language or script the farmer uses. Even if the farmer's words come through unclear or in another language due to transcription, continue the conversation in {language_name}."
 
 
 def build_system_prompt(channel: str, refdata: dict, state: ConversationState, unconfirmed_fields: list[str] | None = None, is_opening_turn: bool = False) -> str:

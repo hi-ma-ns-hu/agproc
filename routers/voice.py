@@ -1,8 +1,8 @@
 from fastapi import APIRouter, WebSocket
 from fastapi.responses import Response
-from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams, FastAPIWebsocketTransport
-from pipecat.serializers.twilio import TwilioFrameSerializer
 from pipecat.audio.vad.silero import SileroVADAnalyzer
+from pipecat.serializers.twilio import TwilioFrameSerializer
+from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams, FastAPIWebsocketTransport
 
 from config import settings
 from services import build_conversation_state, conversation, run_conversation_pipeline
@@ -39,7 +39,7 @@ async def voice_stream(websocket: WebSocket):
   await websocket.accept()
   await websocket.receive_json()
   start_data = await websocket.receive_json()
-  start_data = start_data["start"]
-  direction = start_data.get("customParameters", {}).get("direction", "inbound")
-  transport = FastAPIWebsocketTransport(websocket, params=FastAPIWebsocketParams(audio_in_enabled=True, audio_out_enabled=True, vad_analyzer=SileroVADAnalyzer(),  serializer=TwilioFrameSerializer(stream_sid=start_data["streamSid"], call_sid=start_data['callSid'], account_sid=start_data['accountSid'], auth_token=settings.TWILIO_AUTH_TOKEN)))
+  start_data = start_data['start']
+  direction = start_data.get('customParameters', {}).get('direction', 'inbound')
+  transport = FastAPIWebsocketTransport(websocket, params=FastAPIWebsocketParams(audio_in_enabled=True, audio_out_enabled=True, vad_analyzer=SileroVADAnalyzer(), serializer=TwilioFrameSerializer(stream_sid=start_data['streamSid'], call_sid=start_data['callSid'], account_sid=start_data['accountSid'], auth_token=settings.TWILIO_AUTH_TOKEN)))
   await run_conversation_pipeline(transport, conversation, build_conversation_state, direction)

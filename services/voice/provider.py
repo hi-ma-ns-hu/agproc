@@ -1,9 +1,11 @@
 from config import settings
+
 from .language import VoiceLanguage
 
 
 def _voice_language():
   from pipecat.transcriptions.language import Language
+
   return VoiceLanguage(Language(settings.VOICE_LANGUAGE)).value
 
 

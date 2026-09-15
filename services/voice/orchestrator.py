@@ -13,15 +13,13 @@ logger = get_logger(__name__)
 
 
 class ConversationBridge(FrameProcessor):
-  """Bridges pipecat frames to a domain's conversation turn function, so this same voice pipeline can be reused across domains.
-  """
+  """Bridges pipecat frames to a domain's conversation turn function, so this same voice pipeline can be reused across domains."""
 
   def __init__(self, conversation, build_state, direction: str = 'inbound'):
     super().__init__()
     self.conversation = conversation
     self.state = build_state(direction)
     self.direction = direction
-
 
   async def speak_outbound_opening(self):
     """Called explicitly once, from on_client_connected, for outbound calls."""
@@ -30,7 +28,6 @@ class ConversationBridge(FrameProcessor):
     await self.push_frame(LLMFullResponseStartFrame(), FrameDirection.DOWNSTREAM)
     await self.push_frame(TextFrame(response['reply']), FrameDirection.DOWNSTREAM)
     await self.push_frame(LLMFullResponseEndFrame(), FrameDirection.DOWNSTREAM)
-
 
   async def process_frame(self, frame, direction: FrameDirection):
     await super().process_frame(frame, direction)

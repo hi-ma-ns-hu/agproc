@@ -1,10 +1,10 @@
 from enum import Enum
+
 from pipecat.transcriptions.language import Language
 
 
 class VoiceLanguage(Enum):
-  """The languages this app supports, expressed as pipecat's own canonical Language values.
-  """
+  """The languages this app supports, expressed as pipecat's own canonical Language values."""
 
   BENGALI = Language.BN_IN
   ENGLISH = Language.EN_IN
