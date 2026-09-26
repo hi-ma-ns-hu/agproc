@@ -135,7 +135,10 @@ def render_opening(initiated_by: str, is_opening_turn: bool) -> str:
 
 def render_language_instruction(voice_language: VoiceLanguage) -> str:
   language_name = LANGUAGE_NAMES[voice_language]
-  return f"Always respond in {language_name}, regardless of what language or script the farmer uses. Even if the farmer's words come through unclear or in another language due to transcription, continue the conversation in {language_name}."
+  return (
+    f"Always respond in {language_name} in your `reply` text, regardless of what language or script the farmer uses. Even if the farmer's words come through unclear or in another language due to transcription, continue the conversation in {language_name}.\n"
+    f'This ONLY applies to `reply`. Every value you record in `updates` (crop, variety, grade, crop_state, location, and every other field) MUST always be in English — translate or normalize it internally, even though the farmer spoke in {language_name}. For fields that match the reference data below (like crop or grade), use the exact English name listed there. Never write a value in {language_name} or any other non-English script into `updates` — the system matches these values against the English reference data, and a non-English value will be wrongly treated as unrecognized.'
+  )
 
 
 def build_system_prompt(channel: str, refdata: dict, state: ConversationState, unconfirmed_fields: list[str] | None = None, is_opening_turn: bool = False) -> str:

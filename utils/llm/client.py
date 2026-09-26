@@ -23,7 +23,7 @@ class LLMCallFailed(Exception):
   """Raised when a LLM call fails."""
 
 
-async def get_llm_response(messages: list[dict], response_model: type[BaseModel], tools: list[dict] | None = None, model: str | None = None, max_retries=2):
+async def get_llm_response(messages: list[dict], response_model: type[BaseModel], tools: list[dict] | None = None, model: str | None = None, temperature: float = 0, max_retries=2):
   """
   Call the LLM and get back either:
     - a validated response_model instance (no tools requested, or tools
@@ -38,7 +38,7 @@ async def get_llm_response(messages: list[dict], response_model: type[BaseModel]
   error: Exception | None = None
   for attempt in range(1, max_retries + 2):
     try:
-      kwargs = {'model': model, 'messages': messages, 'response_format': response_model}
+      kwargs = {'model': model, 'messages': messages, 'response_format': response_model, 'temperature': temperature}
       if tools:
         kwargs['tools'] = tools
 
