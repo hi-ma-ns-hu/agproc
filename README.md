@@ -19,12 +19,17 @@ AgProc is a multi-channel agricultural procurement agent — it can call farmers
   - `qualification.py` — decides DECLINE / NEGOTIATE / FORWARD / INCOMPLETE against reference data (`refdata.py`, `refdata.sample.yml`).
   - `prompt.py` — builds the system prompt per channel (`voice` / `messaging`): reference data, outstanding low-confidence fields, rejected-field callouts, and the reached verdict, all rendered into one template.
   - `validation.py` — what's required per crop, what's still missing, what's known but unconfirmed.
+- **Voice pipeline** (`services/voice/`, `routers/voice.py`) — real phone calls via Twilio Media Streams + [pipecat](https://github.com/pipecat-ai/pipecat), decoupled from procurement specifics by dependency injection (`run_conversation_pipeline` takes the conversation engine and state builder as parameters, so another domain could reuse the same pipeline later):
+  - `provider.py` — builds the Sarvam STT/TTS services and Silero VAD for one call.
+  - `orchestrator.py` — wires transport → STT → `ConversationBridge` (turns transcriptions into `conversation()` calls) → TTS → transport into a pipecat `Pipeline`, handling both inbound and outbound call direction.
+  - `language.py` — `VoiceLanguage`, a provider-agnostic enum wrapping pipecat's own `Language` values (not raw Sarvam wire-format strings), so the configured `VOICE_LANGUAGE` also drives *what language the LLM replies in*, not just TTS pronunciation.
+  - `routers/voice.py` — the Twilio webhook endpoints (`/voice/incoming`, `/voice/outgoing`) returning TwiML that opens a `<Stream>` back to `/voice/stream`, and the `websocket` route that starts the pipeline per call.
 - **Structured JSON logging** (`utils/logging/`) — every log line is a single JSON object with per-request context (`trace_id`, `path`, `method`, ...) auto-attached via a `ContextVar`. The *same* formatter runs in every environment — dev sees exactly the same fields production would, just printed to stdout instead of shipped to a log backend.
 - **Optional Redis cache** (`utils/storage/redis.py`) — safe no-op pattern: `redis` is never `None`, it's a stand-in object when `REDIS_URL` is unset, so callers never need to check before calling `redis.get(...)`/`redis.set(...)`. `REDIS_ENABLED` distinguishes "disabled" from a real result where that matters (e.g. health checks).
 - **OpenLLMetry / OpenTelemetry tracing** (`utils/logging/tracing.py`) — built on `traceloop-sdk`, which bundles both LLM-aware instrumentation (rich spans for OpenAI calls: prompt, tokens, cost) and generic service instrumentation (Redis, HTTP, SQL). Required — `TRACELOOP_API_ENDPOINT` has no default, so the app won't boot without an OTLP endpoint configured (see [Tracing locally](#tracing-locally)). FastAPI itself is instrumented separately via `FastAPIInstrumentor` (the one thing `traceloop-sdk` doesn't bundle).
 - **LLM client with retries** (`utils/llm/client.py`) — a lazy `AsyncOpenAI` singleton behind `get_llm_response()`, which retries transient/rate-limit/empty-parse failures with backoff and raises `LLMCallFailed` once retries are exhausted. This is what `services/agent.py` calls.
 - **Test suite** (`tests/`, pytest) — mirrors `services/` and `utils/` one-to-one; covers extraction/validation edge cases, qualification bands, prompt rendering, and the full `conversation()` turn engine with a mocked LLM.
-- **Manual conversation harness** (`evals/harness.py`) — a keyboard-driven REPL against the real `conversation()` engine (and, unless mocked, the real OpenAI API) for poking at agent behavior by hand, over the `voice` channel by default.
+- **Manual conversation harness** (`evals/harness.py`) — a keyboard-driven REPL against the real `conversation()` engine (and, unless mocked, the real OpenAI API) for poking at agent behavior by hand. Prompts at startup for inbound (farmer speaks first) or outbound (agent opens with a greeting), simulating both call directions the same way `services/voice/orchestrator.py` does for real calls. `/state` dumps the claimed record and verdict at any point, `/quit` exits.
 - **Ruff** (`pyproject.toml`) for lint + format — configured to match this codebase's existing style (2-space indent, single quotes), not Ruff's Black-compatible defaults.
 
 ---
@@ -36,7 +41,8 @@ agproc/
 ├── app.py                    # FastAPI factory: lifespan, health routes, trace middleware
 ├── config.py                  # typed settings (pydantic-settings)
 ├── main.py                     # `from app import app` — entrypoint for `fastapi deploy`/`fastapi run`
-├── routers/                    # empty — mount your API routes here
+├── routers/
+│   └── voice.py                # Twilio webhooks (/voice/incoming, /voice/outgoing) + the call websocket
 ├── services/                    # 
 │   ├── agent.py                    # conversation() — one turn: extract, update, qualify, respond
 │   ├── contract.py                  # LLM structured-output contract
@@ -49,6 +55,10 @@ agproc/
 │   ├── refdata.py                         # loads refdata.yml, falls back to refdata.sample.yml
 │   ├── refdata.sample.yml                  # example crop reference data (prices, grades, margins)
 │   ├── tools.py                             # tool-calling definitions (currently empty)
+│   ├── voice/                                # pipecat voice pipeline (Twilio <-> Sarvam STT/TTS)
+│   │   ├── orchestrator.py                     # wires transport/STT/TTS into a pipecat Pipeline
+│   │   ├── provider.py                          # builds Sarvam STT/TTS + Silero VAD per call
+│   │   └── language.py                           # VoiceLanguage enum (pipecat Language, not raw Sarvam codes)
 │   └── __init__.py                          # re-exports the package's public API
 ├── evals/
 │   └── harness.py               # keyboard REPL for manually driving conversation()
@@ -76,9 +86,12 @@ agproc/
 ### Prerequisites
 - Python 3.12+
 - **Required**: a running Postgres instance, an OTLP-speaking tracing backend (see
-  [Tracing locally](#tracing-locally)), and an OpenAI API key — the app won't boot without all
-  three configured.
+  [Tracing locally](#tracing-locally)), an OpenAI API key, a Sarvam API key (STT/TTS), and a
+  Twilio account SID + auth token — the app won't boot without all of these configured.
 - Optional: Redis.
+- To actually receive/place phone calls locally (not needed for the harness or tests): `ngrok`
+  (or any tunnel) to expose the local server to Twilio's webhooks — see
+  [Voice calls locally](#voice-calls-locally).
 
 ### Setup
 ```bash
@@ -94,19 +107,20 @@ cp .env.example .env  # then point DATABASE_URL / TRACELOOP_API_ENDPOINT / OPENA
 
 ### Running
 ```bash
-make dev              # uvicorn app:app --port 7000 --reload
+make dev              # uvicorn app:app --port 5000 --reload
 ```
 - `GET /api/health` — liveness probe.
 - `GET /api/health/ready` — readiness probe; reports Redis + database status, 503s while draining on shutdown.
-- Interactive docs (dev only): http://localhost:7000/docs
+- Interactive docs (dev only): http://localhost:5000/docs
 
 ### Trying the conversation agent by hand
 ```bash
 python -m evals.harness
 ```
-Type as the farmer; `/state` dumps the claimed record and verdict at any point, `/quit` exits.
-This calls the real OpenAI API (no mocking), so it needs `OPENAI_API_KEY` set. The harness drives
-the `voice` channel; pass `channel='messaging'` to `conversation()` to exercise the other one.
+Prompts for inbound vs. outbound at startup, then type as the farmer; `/state` dumps the claimed
+record and verdict at any point, `/quit` exits. This calls the real OpenAI API (no mocking), so it
+needs `OPENAI_API_KEY` set. The harness drives the `voice` channel; pass `channel='messaging'` to
+`conversation()` directly to exercise the other one.
 
 ### Testing
 ```bash
@@ -137,6 +151,11 @@ See [`.env.example`](.env.example) / [`config.py`](config.py).
 | `TRACELOOP_API_ENDPOINT` | **required** — OTLP HTTP endpoint for OpenLLMetry/OTel tracing (e.g. a local Jaeger instance); no fallback, app won't boot without it |
 | `OPENAI_API_KEY` | **required** — used by `utils/llm/client.py`'s `AsyncOpenAI` client; no fallback, app won't boot without it |
 | `PROCUREMENT_MODEL` | OpenAI model used for conversation turns (default `gpt-4o`) |
+| `SARVAM_API_KEY` | **required** — Sarvam STT/TTS, used by `services/voice/provider.py`; no fallback, app won't boot without it |
+| `STT_MODEL` | Sarvam STT model (default `saaras:v3`) |
+| `TTS_MODEL` | Sarvam TTS model (default `bulbul:v3`) |
+| `VOICE_LANGUAGE` | BCP-47-style code (e.g. `hi-IN`) controlling both Sarvam STT/TTS language and which language the LLM replies in on voice calls (default `hi-IN`); see `services/voice/language.py`'s `VoiceLanguage` for the supported set |
+| `TWILIO_ACCOUNT_SID` / `TWILIO_AUTH_TOKEN` | **required** — used by `routers/voice.py`'s Twilio webhooks and the call serializer; no fallback, app won't boot without them |
 | `CURRENCY` | currency symbol used in prompts and price rendering (default `₹`) |
 | `WEIGHT` | canonical weight unit quantity/price get converted to (default `quintal`) |
 
@@ -178,6 +197,24 @@ Notes:
 
 ---
 
+## Voice calls locally
+
+Twilio needs a public HTTPS URL to reach your local server for both the incoming-call webhook
+and the Media Stream websocket, so a tunnel is required even for local testing:
+
+1. Run the app (`make dev`) and a tunnel against the same port, e.g. `ngrok http 5000`.
+2. Point the TwiML in `routers/voice.py` (`/voice/incoming`, `/voice/outgoing`) at that tunnel's
+   `wss://` URL for the `<Stream>` — update it each time the tunnel restarts, since a free ngrok
+   URL changes on every restart.
+3. For an **inbound** test call: configure the Twilio phone number's "A call comes in" webhook to
+   `https://<tunnel>/api/voice/incoming`, then call that number.
+4. For an **outbound** test call: use the Twilio REST client to place a call with
+   `url='https://<tunnel>/api/voice/outgoing'` (see `client.calls.create(...)` in the Twilio docs)
+   — `routers/voice.py`'s websocket route reads the `direction` custom parameter to tell
+   `services/agent.py`'s `conversation()` whether the agent or the farmer speaks first.
+
+---
+
 ## Deferred on purpose
 
 A few things were deliberately left out rather than half-configured — add them when there's
@@ -187,5 +224,8 @@ actual code that needs them, not before:
   non-trivial data shapes to check. Ruff does not type-check.
 - **Metrics backend** (Prometheus/Grafana Mimir) — `Traceloop.init()` already emits metrics
   (token usage, operation duration, ...); nothing currently collects them.
-- **API routes** (`routers/`) — the conversation engine isn't wired to an HTTP/websocket
-  endpoint yet; `evals/harness.py` is the only way to drive it today.
+- **Messaging channel routes** — the `voice` channel is wired end-to-end (`routers/voice.py`,
+  Twilio + pipecat); `messaging` only exists as a code path in `services/prompt.py`'s
+  `CHANNEL_CONTEXT` and isn't connected to any actual messaging provider (WhatsApp, SMS, ...) yet.
+  `evals/harness.py` currently only drives the `voice` channel too, though `conversation()` itself
+  already accepts `channel='messaging'`.
