@@ -43,6 +43,7 @@ class Reading:
   value: Any = None
   confidence: Confidence = Confidence.UNKNOWN
   turn: int | None = None
+  confirmation_asked: Any = None  # value last asked to be reconfirmed after a reference-data mismatch (e.g. unrecognized crop/grade)
 
   def update(self, value: Any, confidence: Confidence, turn: int):
     """
@@ -121,7 +122,7 @@ class Verdict(Enum):
 @dataclass
 class Qualification:
   """
-  The decision what the agent concluded about the claimed lot.
+  The decision what the agent concluded about the claimed lot in an conversation.
   """
 
   verdict: Verdict = Verdict.INCOMPLETE
@@ -215,7 +216,6 @@ class ConversationState:
   meta: ConversationMeta = field(default_factory=CallMeta)
   history: list[ConversationHistory] = field(default_factory=list)
   rejected_fields: list[str] = field(default_factory=list)
-  crop_asked_to_confirm: str | None = None
 
   def summary(self) -> str:
     """

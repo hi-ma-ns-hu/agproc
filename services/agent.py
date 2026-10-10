@@ -91,8 +91,8 @@ async def conversation(input: str, state: ConversationState, channel: str = 'voi
   crop_value = state.claimed.crop.value
   crop_config = config(crop_value, refdata) if crop_value else None
 
-  if crop_value and crop_config is None and not state.qualification.is_decided() and state.crop_asked_to_confirm != crop_value:
-    state.crop_asked_to_confirm = crop_value
+  if crop_value and crop_config is None and not state.qualification.is_decided() and state.claimed.crop.confirmation_asked != crop_value:
+    state.claimed.crop.confirmation_asked = crop_value
     confirm_prompt = build_crop_confirmation_prompt(channel=channel, crop=crop_value, farmer_input=input)
     confirm_messages = [{'role': 'system', 'content': confirm_prompt}]
     confirm_output = await get_llm_response(confirm_messages, ConversationOutput, model=settings.PROCUREMENT_MODEL)
