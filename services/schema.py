@@ -215,6 +215,7 @@ class ConversationState:
   meta: ConversationMeta = field(default_factory=CallMeta)
   history: list[ConversationHistory] = field(default_factory=list)
   rejected_fields: list[str] = field(default_factory=list)
+  crop_asked_to_confirm: str | None = None
 
   def summary(self) -> str:
     """

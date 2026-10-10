@@ -5,7 +5,7 @@ from utils import LLMCallFailed, get_llm_response, get_logger
 
 from .contract import ConversationOutput
 from .extraction import apply_updates
-from .prompt import CLOSING_INSTRUCTION, build_system_prompt
+from .prompt import CLOSING_INSTRUCTION, build_crop_confirmation_prompt, build_system_prompt
 from .qualification import qualify
 from .refdata import crop_config as config
 from .refdata import load_refdata
@@ -90,6 +90,14 @@ async def conversation(input: str, state: ConversationState, channel: str = 'voi
   # qualify (re-resolve crop config: this turn's updates may have just supplied the crop)
   crop_value = state.claimed.crop.value
   crop_config = config(crop_value, refdata) if crop_value else None
+
+  if crop_value and crop_config is None and not state.qualification.is_decided() and state.crop_asked_to_confirm != crop_value:
+    state.crop_asked_to_confirm = crop_value
+    confirm_prompt = build_crop_confirmation_prompt(channel=channel, crop=crop_value, farmer_input=input)
+    confirm_messages = [{'role': 'system', 'content': confirm_prompt}]
+    confirm_output = await get_llm_response(confirm_messages, ConversationOutput, model=settings.PROCUREMENT_MODEL)
+    state.history[-1] = ConversationHistory(role=Role.ASSISTANT, content=confirm_output.reply)
+    return {'reply': confirm_output.reply, 'state': state, 'done': False}
 
   qualified = False
   if crop_value and not state.qualification.is_decided() and (crop_config is None or is_completed(state.claimed, crop_config)):

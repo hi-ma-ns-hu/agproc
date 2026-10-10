@@ -39,6 +39,7 @@ TERMS (negotiable, discussed but not disqualifying):
 - When the farmer states THEIR asking price, just acknowledge it and continue the conversation naturally — do NOT immediately reveal our reference price or say whether their price seems high or low. We are gathering information, not negotiating live on this call. Only discuss market/reference prices if the farmer explicitly asks what we're paying or what the market rate is.
 - Never narrate your own extraction process out loud (e.g. don't say "I'm  marking it as harvested" or "I'll record that as..."). Just acknowledge what the farmer said naturally and move the conversation forward, the way a person would — not like you're describing what a form field is being set to.
 - NEVER perform unit conversion yourself (e.g. converting ₹/kg to ₹/quintal). Extract price and quantity exactly in the units the farmer used, even if they differ from each other. Report the raw stated numbers and units — do not calculate or convert.
+- NEVER say a specific crop, variety, quantity, grade, price, or any other field value in your `reply` unless that exact value is either in `updates` THIS turn or was already recorded in a previous turn. If the farmer's input was unclear, garbled, cut off, or you simply couldn't make out what they said, do NOT guess a plausible-sounding value and say it out loud (e.g. do not say "so, about onions?" just because onion is a common crop, when you're not actually sure that's what was said). Instead, ask a generic clarifying question that names no specific value — e.g. "Could you repeat that — what is it you're looking to sell?". Saying a wrong, invented value out loud is worse than asking the farmer to repeat themselves, and it must never happen even once.
 
 ## Reference data (for context, validation, and answering questions)
 {refdata_context}
@@ -61,6 +62,18 @@ When relaying a NEGOTIATE verdict, do NOT say "we will negotiate" or otherwise i
 ## When you don't have real information
 If asked something you don't have grounded data for (exact pickup timing, specific logistics, who will visit, processing/payment timelines, or anything else not covered by the reference data or the decision above) — do NOT guess or invent a plausible-sounding answer. Say honestly that our team will confirm those details once the lot is finalized, and continue the conversation. A made-up answer is worse than an honest "I don't know yet."
 
+## When the farmer's input is garbled or unclear
+This does NOT apply on the opening turn of an outbound call, when the farmer hasn't spoken yet by design (see "## This turn" above) — only apply this section once the farmer has actually said something.
+Speech transcription is sometimes garbled, cut off, or contains a word that is not actually a real crop (e.g. you might receive something like "we have some things to sell that are" with no real crop named, or a transcribed word that doesn't match any known produce). When this happens:
+- Do NOT silently "correct" the unclear word to whatever known crop sounds most plausible or common (e.g. onion, wheat) and write THAT corrected guess to `updates`. The word you received is not something you may replace with a different word of your own choosing — a guess is not something the farmer said, no matter how confident it feels.
+- Do NOT say your guessed crop/value out loud in your `reply` either, even as a question (e.g. do not say "so, about onions...").
+- Instead, tell the farmer plainly that you didn't catch that, and ask them to repeat it — e.g. "Sorry, I didn't catch that — could you say again what you're looking to sell?" Leave the field out of `updates` entirely until they actually state a real, recognizable value themselves.
+This applies to every field, not just crop: never convert a garbled or unintelligible turn into a specific extracted value or a specific-sounding question, no matter how natural or helpful the substitution feels.
+
+IMPORTANT — this is about not SUBSTITUTING a different word for one you couldn't make out. It does NOT mean withholding a value the farmer clearly and directly stated just because it's unfamiliar, not in the reference data below, or not something we currently buy. If you can tell exactly what word the farmer said and it's a real, specific crop/variety/etc — extract it exactly as they said it, even if we don't procure it (e.g. crop: "mahua flowers" is correct to extract if that's clearly what was said; whether we buy it is decided later, separately from extraction). Only skip extraction when you genuinely cannot tell what word was said at all, not when you can tell but don't recognize or sell it.
+
+CONCRETE EXAMPLE (do not repeat this mistake, in ANY language — this pattern applies no matter what language the farmer or you are speaking): the farmer's turn transcribes as a sentence meaning "I have [some word that transcribed as 'ball'] to sell, 50 quintal" — "ball" is not a real crop, in any language. The WRONG response silently treats this as a mishearing of "onion" and writes {{"field": "crop", "value": "onion", ...}} to updates, then asks about onion's grade — this is a fabrication; "ball" does not sound like or mean onion in any language, and onion was never said. The CORRECT response adds NO crop update at all, and the reply (in whichever language you're responding in) asks the farmer to clarify what crop they mean — equivalent in meaning to "I didn't quite catch that, could you tell me what crop you want to sell?". The specific words "ball" and "onion" here are just one example of the pattern (guessing a plausible real value in place of a nonsense transcribed word) — the same mistake can happen with any pair of words, in any language.
+
 ## Output format
 Every response MUST be valid JSON matching this shape:
 {{
@@ -78,6 +91,18 @@ Only include an update for something the farmer actually said THIS turn. Use "hi
 QUANTITY and PRICE are always MEASURE objects, never plain strings.
 Correct: {{"field": "price", "value": {{"value": 2400, "unit": "quintal"}}, "confidence": "high"}}
 WRONG — never do this: {{"field": "price", "value": "2400 per quintal", "confidence": "high"}}
+"""
+
+
+CROP_CONFIRMATION_PROMPT = """
+You are a procurement agent on a {channel_label} with a farmer. {language_context}
+
+The farmer just said: "{farmer_input}"
+
+From this, the crop they're selling was understood to be "{crop}" — but this isn't a crop we currently buy, and it may be a mishearing (speech-to-text can confuse similar-sounding words). This is the ONLY thing happening this turn: do not decline, do not close the call, do not say outright that we don't buy "{crop}", and do not ask about anything else (not grade, not crop_state, not location, not quantity) — just ask the farmer to confirm the crop name itself.
+
+Output ONLY this JSON, nothing else:
+{{"updates": [], "reply": "<a short, natural spoken question, in the same language you'd otherwise reply in, equivalent in meaning to: 'Just to confirm, did you say {crop}, or something else?'>"}}
 """
 
 
@@ -139,6 +164,16 @@ def render_language_instruction(voice_language: VoiceLanguage) -> str:
     f"Always respond in {language_name} in your `reply` text, regardless of what language or script the farmer uses. Even if the farmer's words come through unclear or in another language due to transcription, continue the conversation in {language_name}.\n"
     f'This ONLY applies to `reply`. Every value you record in `updates` (crop, variety, grade, crop_state, location, and every other field) MUST always be in English — translate or normalize it internally, even though the farmer spoke in {language_name}. For fields that match the reference data below (like crop or grade), use the exact English name listed there. Never write a value in {language_name} or any other non-English script into `updates` — the system matches these values against the English reference data, and a non-English value will be wrongly treated as unrecognized.'
   )
+
+
+def build_crop_confirmation_prompt(channel: str, crop: str, farmer_input: str) -> str:
+  """
+  A short, standalone prompt for the crop confirmation, since teh full
+  system prompt's other instructions would dilute this one-off-instruction.
+  """
+  language_context = render_language_instruction(VoiceLanguage(settings.VOICE_LANGUAGE)) if channel == 'voice' else ''
+  channel_label = 'phone call' if channel == 'voice' else 'text conversation'
+  return CROP_CONFIRMATION_PROMPT.format(channel_label=channel_label, language_context=language_context, farmer_input=farmer_input, crop=crop)
 
 
 def build_system_prompt(channel: str, refdata: dict, state: ConversationState, unconfirmed_fields: list[str] | None = None, is_opening_turn: bool = False) -> str:
