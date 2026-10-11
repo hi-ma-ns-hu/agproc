@@ -1,6 +1,6 @@
 from config import settings
 
-from .schema import ConversationInitiator, ConversationState
+from .schema import ClaimedRecord, Confidence, ConversationInitiator, ConversationState, Measure
 from .voice import LANGUAGE_NAMES, VoiceLanguage
 
 CHANNEL_CONTEXT = {
@@ -19,13 +19,13 @@ You are NOT filling out a form — do not ask questions in a fixed order or read
 FACTS about the lot (these matter for whether it's worth pursuing at all):
 - crop: what produce it is
 - variety: the variety, if relevant (optional)
-- quantity: how much, WITH ITS UNIT (e.g. "40 quintal") — never assume a unit
+- quantity: how much, WITH ITS UNIT (e.g. "40 quintal"). If the farmer gives a bare number with NO unit at all (e.g. just "30"), do NOT ask an open "which unit do you mean?" question — that sounds like you don't know how this business normally deals in produce. Instead, reason about which unit makes that number a realistic single-farmer lot size for this crop (most lots are a double-digit-to-low-hundreds number of quintals, not kg or tonnes — but judge the actual number on its own merits, don't default blindly) and extract it with LOW confidence, not HIGH — this is exactly the "inferring/guessing" case the confidence rule above describes. Your `reply` should confirm your inference naturally, as a yes/no-style confirming question, in whichever language you're replying in — equivalent in meaning to "okay, that's 30 quintal, right?" — not an open question. Only treat it as confirmed (HIGH) once the farmer actually confirms, the same way any other LOW-confidence field gets confirmed.
 - grade: ONLY ASK ABOUT THIS IF THE CROP IS GRADED. Check the reference data below — a crop listed as "graded" has known grade tiers; a crop listed as "ungraded" has a single price and NO grade concept. NEVER ask about or record a grade for an ungraded crop.
 - crop_state: is it already harvested, being harvested now, or still standing in the field? Record it as exactly one of "harvested", "harvesting", "standing" — never a paraphrase (e.g. never "in storage", "ready", "stored", "picked").
 - location: where the produce is
 
 TERMS (negotiable, discussed but not disqualifying):
-- price: what the farmer is asking, WITH ITS UNIT
+- price: what the farmer is asking, WITH ITS UNIT. If the farmer gives a bare number with NO unit at all (e.g. just "23"), do NOT ask an open "which unit do you mean?" question — same reasoning as quantity above. Instead, compare the number against THIS crop's reference price in the data below and infer whichever unit (₹/kg, ₹/quintal, ₹/tonne) makes the number land in a realistic range relative to that reference — e.g. if the reference price is ₹2450/quintal and the farmer says "23", that is wildly implausible as a per-quintal price but realistic as a per-kg price (₹23/kg ≈ ₹2300/quintal, close to the reference), so infer per-kg there, not per-quintal; a different number near 2450 would instead suggest per-quintal. Extract with LOW confidence, not HIGH. Your `reply` should confirm your inference naturally, as a yes/no-style confirming question, in whichever language you're replying in — equivalent in meaning to "okay, that's ₹23 per kg, right?" — not an open question. Only treat it as confirmed (HIGH) once the farmer actually confirms.
 - payment_terms, handover (pickup vs delivery), transport (who bears it) — collect if they come up naturally; don't force them early.
 
 ## How to behave
@@ -88,9 +88,10 @@ Every response MUST be valid JSON matching this shape:
 
 Only include an update for something the farmer actually said THIS turn. Use "high" confidence when clearly stated, "low" when unclear, mumbled, or you're inferring. Do not guess a field just to fill it in — leave it out if unstated.
 
-QUANTITY and PRICE are always MEASURE objects, never plain strings.
-Correct: {{"field": "price", "value": {{"value": 2400, "unit": "quintal"}}, "confidence": "high"}}
-WRONG — never do this: {{"field": "price", "value": "2400 per quintal", "confidence": "high"}}
+QUANTITY and PRICE are always MEASURE objects, never plain strings — this is a FORMAT rule, independent of confidence. The two examples below both use the correct Measure shape; only their confidence differs, because of what was actually said:
+Correct, unit stated explicitly by the farmer: {{"field": "price", "value": {{"value": 2400, "unit": "quintal"}}, "confidence": "high"}}
+Correct, bare number with no unit stated — unit inferred by you: {{"field": "price", "value": {{"value": 23, "unit": "kg"}}, "confidence": "low"}}
+WRONG — never do this (price as a plain string instead of a Measure object, regardless of confidence): {{"field": "price", "value": "2400 per quintal", "confidence": "high"}}
 """
 
 
@@ -114,6 +115,110 @@ All the information needed has been gathered and a decision has been reached (se
 - Thank the farmer and end the conversation naturally.
 - Do NOT ask any new questions. Do NOT continue gathering information.
 """
+
+
+EXTRACTION_PROMPT_TEMPLATE = """
+You are extracting structured updates from ONE message a farmer just sent, in a produce-procurement phone conversation. {language_context}
+
+## The record so far (what's already known, for spotting corrections — NOT something to re-decide from scratch)
+{record_context}
+
+## What we just said to the farmer
+{last_question}
+
+## The farmer's message THIS turn
+"{farmer_input}"
+
+## Your ONLY job
+Decide what, if anything, THIS message adds, changes, or confirms about the record above. Base every update STRICTLY on what this message itself says. Never re-derive, re-judge, or "notice" a field just because it's already in the record above, or because it was discussed earlier in the conversation — you do not have the earlier conversation in front of you, only the record snapshot and this one message. If this message doesn't say anything relevant to a field, leave it out of `updates` entirely — even if that field is currently unconfirmed or missing. A field that's "stated but NOT yet confirmed" above can only become confirmed (high confidence) if THIS message itself provides that confirmation (e.g. answering "yes"/"haan"/restating the value in direct response to what we just asked) — not by your own assessment that it's probably fine.
+
+## What you're extracting
+FACTS about the lot:
+- crop: what produce it is
+- variety: the variety, if relevant (optional)
+- quantity: how much, WITH ITS UNIT (e.g. "40 quintal"). If the farmer gives a bare number with NO unit at all (e.g. just "30"), do NOT leave the unit out. Instead, reason about which unit makes that number a realistic single-farmer lot size for this crop (most lots are a double-digit-to-low-hundreds number of quintals, not kg or tonnes — but judge the actual number on its own merits, don't default blindly) and extract it with LOW confidence, not HIGH — this is exactly the "inferring/guessing" case below.
+- grade: ONLY IF THE CROP IS GRADED. Check the reference data below — a crop listed as "graded" has known grade tiers; a crop listed as "ungraded" has a single price and NO grade concept. NEVER record a grade for an ungraded crop.
+- crop_state: harvested, harvesting, or standing — never a paraphrase (e.g. never "in storage", "ready", "stored", "picked").
+- location: where the produce is
+
+TERMS:
+- price: what the farmer is asking, WITH ITS UNIT. If the farmer gives a bare number with NO unit at all (e.g. just "23"), compare the number against THIS crop's reference price in the data below and infer whichever unit (₹/kg, ₹/quintal, ₹/tonne) makes the number land in a realistic range relative to that reference — e.g. if the reference price is ₹2450/quintal and the farmer says "23", that is wildly implausible as a per-quintal price but realistic as a per-kg price (₹23/kg ≈ ₹2300/quintal, close to the reference), so infer per-kg there, not per-quintal; a different number near 2450 would instead suggest per-quintal. Extract with LOW confidence, not HIGH.
+- payment_terms, handover (pickup vs delivery), transport (who bears it) — only if mentioned this message.
+
+NEVER perform unit conversion yourself (e.g. converting ₹/kg to ₹/quintal). Extract price and quantity exactly in the units the farmer used. Report the raw stated numbers and units — do not calculate or convert.
+
+## Confidence
+Mark HIGH only when THIS message states the value directly and unambiguously. Mark LOW if you are inferring, guessing, or the message was vague — even if your inference seems obviously correct (e.g. "ready" implies harvested, but that's an inference, not a direct statement — LOW).
+
+## Reference data (for unit inference and validation)
+{refdata_context}
+
+## Garbled or unclear input
+Speech transcription is sometimes garbled, cut off, or contains a word that is not a real crop. When this happens:
+- Do NOT silently "correct" the unclear word to whatever known crop sounds most plausible or common, and write that corrected guess to `updates`. A guess is not something the farmer said, no matter how confident it feels.
+- Leave the field out of `updates` entirely until the farmer states a real, recognizable value.
+- This does NOT mean withholding a value that was clearly and directly stated just because it's unfamiliar or not something we currently buy — extract it exactly as said (e.g. crop: "mahua flowers" is correct to extract if that's clearly what was said, even if we don't procure it). Only skip extraction when you genuinely cannot tell what word was said at all.
+
+## Output format
+Every response MUST be valid JSON matching this shape:
+{{
+  "updates": [
+    {{"field": "<one of: crop, variety, quantity, grade, crop_state, location,
+       price, payment_terms, handover, transport, contact>",
+      "value": "<text>" OR {{"value": <number>, "unit": "<text>"}},
+      "confidence": "high" | "low"}}
+  ]
+}}
+
+Only include an update for something THIS message actually says. Do not guess a field just to fill it in — leave it out if unstated.
+
+QUANTITY and PRICE are always MEASURE objects, never plain strings — this is a FORMAT rule, independent of confidence. The two examples below both use the correct Measure shape; only their confidence differs, because of what was actually said:
+Correct, unit stated explicitly by the farmer: {{"field": "price", "value": {{"value": 2400, "unit": "quintal"}}, "confidence": "high"}}
+Correct, bare number with no unit stated — unit inferred by you: {{"field": "price", "value": {{"value": 23, "unit": "kg"}}, "confidence": "low"}}
+WRONG — never do this (price as a plain string instead of a Measure object, regardless of confidence): {{"field": "price", "value": "2400 per quintal", "confidence": "high"}}
+"""
+
+
+def _render_record(record: ClaimedRecord) -> str:
+  """Compact snapshot of the current claimed record, so the extraction call can spot corrections/confirmations without being handed the full transcript."""
+  lines = []
+  for name in ('crop', 'variety', 'quantity', 'grade', 'crop_state', 'location', 'price', 'payment_terms', 'handover', 'transport', 'contact'):
+    reading = getattr(record, name)
+
+    if reading.confidence == Confidence.UNKNOWN:
+      lines.append(f'- {name}: not yet stated')
+      continue
+
+    value = reading.value
+    if isinstance(value, Measure):
+      value = f'{value.value} {value.unit}' if value.value is not None else 'not yet stated'
+    elif hasattr(value, 'value'):  # enum (CropState)
+      value = value.value
+
+    status = 'confirmed' if reading.confidence == Confidence.HIGH else 'stated but NOT yet confirmed'
+    lines.append(f'- {name}: {value} ({status})')
+  return '\n'.join(lines)
+
+
+def _render_extraction_language_instruction(voice_language: VoiceLanguage) -> str:
+  language_name = LANGUAGE_NAMES[voice_language]
+  return f'The farmer may speak in {language_name} or any other language. Every value you record in `updates` (crop, variety, grade, crop_state, location, and every other field) MUST always be in English — translate or normalize it internally. For fields that match the reference data below (like crop or grade), use the exact English name listed there. Never write a value in {language_name} or any other non-English script into `updates`.'
+
+
+def build_extraction_prompt(channel: str, refdata: dict, record: ClaimedRecord, last_question: str | None, farmer_input: str) -> str:
+  """
+  The NLU half of a turn: decide what this ONE message adds/changes/confirms, scoped to the
+  current record snapshot + the last thing we said, deliberately NOT the full transcript —
+  so the model can't re-derive a field's confidence by re-reading old turns it wasn't asked about.
+  """
+  language_context = _render_extraction_language_instruction(VoiceLanguage(settings.VOICE_LANGUAGE)) if channel == 'voice' else ''
+  return EXTRACTION_PROMPT_TEMPLATE.format(
+    language_context=language_context,
+    record_context=_render_record(record),
+    last_question=last_question or '(this is the first message of the call)',
+    farmer_input=farmer_input,
+    refdata_context=render_refdata(refdata),
+  )
 
 
 def render_refdata(refdata: dict) -> str:
@@ -152,13 +257,13 @@ def render_rejected(rejected: list[tuple[str, str]]) -> str:
   return f'IMPORTANT: the farmer\'s last answer for {field} could NOT be recorded — {reason} This OVERRIDES the "don\'t ask again" rule above for this field only.{tail}\nYour `reply` text this turn MUST contain an actual question asking the farmer to restate {field} in a way you can record (e.g. state the exact number and a real unit like kg, quintal, or tonne — not a container like "bags" or "sacks").\nDo NOT put {field} in `updates` again unless the farmer states a genuinely new, valid value THIS turn — do not resubmit the old rejected value, and do not silently accept or acknowledge it as if it were fine. Do not move on to any other field until {field} is resolved.'
 
 
-def render_opening(initiated_by: str, is_opening_turn: bool) -> str:
+def _render_opening(initiated_by: str, is_opening_turn: bool) -> str:
   if is_opening_turn and initiated_by == ConversationInitiator.US:
     return "This is the very first thing you say — the farmer has not spoken yet. Open with a brief, friendly greeting: who you are, that you're calling about produce they may have to sell. Keep it short."
   return '(not the opening turn — respond normally to what the farmer said)'
 
 
-def render_language_instruction(voice_language: VoiceLanguage) -> str:
+def _render_language_instruction(voice_language: VoiceLanguage) -> str:
   language_name = LANGUAGE_NAMES[voice_language]
   return (
     f"Always respond in {language_name} in your `reply` text, regardless of what language or script the farmer uses. Even if the farmer's words come through unclear or in another language due to transcription, continue the conversation in {language_name}.\n"
@@ -171,7 +276,7 @@ def build_crop_confirmation_prompt(channel: str, crop: str, farmer_input: str) -
   A short, standalone prompt for the crop confirmation, since teh full
   system prompt's other instructions would dilute this one-off-instruction.
   """
-  language_context = render_language_instruction(VoiceLanguage(settings.VOICE_LANGUAGE)) if channel == 'voice' else ''
+  language_context = _render_language_instruction(VoiceLanguage(settings.VOICE_LANGUAGE)) if channel == 'voice' else ''
   channel_label = 'phone call' if channel == 'voice' else 'text conversation'
   return CROP_CONFIRMATION_PROMPT.format(channel_label=channel_label, language_context=language_context, farmer_input=farmer_input, crop=crop)
 
@@ -181,5 +286,5 @@ def build_system_prompt(channel: str, refdata: dict, state: ConversationState, u
   Fill the template for one call.
   """
   verdict_context = render_verdict(state) if state.qualification.is_decided() else ''
-  language_context = render_language_instruction(VoiceLanguage(settings.VOICE_LANGUAGE)) if channel == 'voice' else ''
-  return SYSTEM_PROMPT_TEMPLATE.format(channel_context=CHANNEL_CONTEXT[channel], language_context=language_context, refdata_context=render_refdata(refdata), verdict_context=verdict_context or '(no decision yet — continue gathering information)', unconfirmed_context=_render_unconfirmed(unconfirmed_fields or []), rejected_context=render_rejected(state.rejected_fields or []), opening_context=render_opening(state.meta.initiated_by.value, is_opening_turn))
+  language_context = _render_language_instruction(VoiceLanguage(settings.VOICE_LANGUAGE)) if channel == 'voice' else ''
+  return SYSTEM_PROMPT_TEMPLATE.format(channel_context=CHANNEL_CONTEXT[channel], language_context=language_context, refdata_context=render_refdata(refdata), verdict_context=verdict_context or '(no decision yet — continue gathering information)', unconfirmed_context=_render_unconfirmed(unconfirmed_fields or []), rejected_context=render_rejected(state.rejected_fields or []), opening_context=_render_opening(state.meta.initiated_by.value, is_opening_turn))

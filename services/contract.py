@@ -37,3 +37,15 @@ class ConversationOutput(BaseModel):
 
   updates: list[ExtractedField] = Field(default_factory=list)
   reply: str
+
+
+class ExtractionOutput(BaseModel):
+  """The NLU half of a turn: what this one message adds/changes/confirms about the record."""
+
+  updates: list[ExtractedField] = Field(default_factory=list)
+
+
+class ReplyOutput(BaseModel):
+  """The NLG half of a turn: what to say next, given the record already updated by extraction."""
+
+  reply: str

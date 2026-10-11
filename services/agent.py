@@ -3,9 +3,9 @@ import json
 from config import settings
 from utils import LLMCallFailed, get_llm_response, get_logger
 
-from .contract import ConversationOutput
+from .contract import ConversationOutput, ExtractionOutput, ReplyOutput
 from .extraction import apply_updates
-from .prompt import CLOSING_INSTRUCTION, build_crop_confirmation_prompt, build_system_prompt
+from .prompt import CLOSING_INSTRUCTION, build_crop_confirmation_prompt, build_extraction_prompt, build_system_prompt
 from .qualification import qualify
 from .refdata import crop_config as config
 from .refdata import load_refdata
@@ -27,7 +27,7 @@ def _execute_tool(name: str, args: dict, refdata: dict) -> str:
   return f'Unknown tool: {name}'
 
 
-async def _resolve_tool_calls(message, messages: list[dict], refdata: dict, state: ConversationState, turn_num: int) -> ConversationOutput:
+async def _resolve_tool_calls(message, messages: list[dict], refdata: dict, state: ConversationState, turn_num: int, output_cls: type = ReplyOutput):
   """
   Execute the tool(s) the model requested. Only the tool's result gets persisted to state.history, as plain content.
   """
@@ -41,14 +41,19 @@ async def _resolve_tool_calls(message, messages: list[dict], refdata: dict, stat
     messages.append({'role': 'tool', 'tool_call_id': tool_call.id, 'content': result_txt})
     state.history.append(ConversationHistory(role=Role.TOOL, content=result_txt))
 
-  result = await get_llm_response(messages, ConversationOutput, tools=TOOLS or None, model=settings.PROCUREMENT_MODEL)
-  if not isinstance(result, ConversationOutput):
+  result = await get_llm_response(messages, output_cls, tools=TOOLS or None, model=settings.PROCUREMENT_MODEL)
+  if not isinstance(result, output_cls):
     raise LLMCallFailed('Model requested a second tool call in one conversation turn - not supported yet.')
   return result
 
 
 async def conversation(input: str, state: ConversationState, channel: str = 'voice', is_opening_turn: bool = False) -> dict:
-  """One turn of the conversation: extract, update memory, qualify and respond."""
+  """
+  One turn of the conversation, split into two calls with different inputs:
+    - NLU (extraction): sees only the current record snapshot + the last thing we said + this one message. It decides `updates`. Deliberately NOT given the full transcript, so it can't silently re-derive/re-judge a field's confidence by re-reading old turns it wasn't asked about this turn - it only has this turn's message to go on.
+    - NLG (reply): sees the full transcript (as before) + the record already updated by NLU, and
+      decides only what to say next.
+  """
   refdata = load_refdata()
   turn_num = state.meta.turn_count + 1
   logger.info(f'Turn {turn_num} input: {input}')
@@ -56,35 +61,27 @@ async def conversation(input: str, state: ConversationState, channel: str = 'voi
   crop_value = state.claimed.crop.value
   crop_config = config(crop_value, refdata) if crop_value else None
 
-  unconfirmed_fields = unconfirmed(state.claimed, crop_config) if crop_config else []
-  system_prompt = build_system_prompt(channel=channel, refdata=refdata, state=state, unconfirmed_fields=unconfirmed_fields, is_opening_turn=is_opening_turn)
+  # --- NLU: narrow extraction call, scoped to this one message ---
+  if is_opening_turn:
+    extracted_updates = list()
+  else:
+    last_question = state.history[-1].content if state.history else None
+    extraction_prompt = build_extraction_prompt(channel=channel, refdata=refdata, record=state.claimed, last_question=last_question, farmer_input=input)
+    extraction_messages = [{'role': 'system', 'content': extraction_prompt}, {'role': 'user', 'content': input}]
 
-  messages = [{'role': 'system', 'content': system_prompt}]
-  messages += [{'role': history.role.value, 'content': history.content} for history in state.history]
-  messages.append({'role': 'user', 'content': input})
+    try:
+      extraction_result = await get_llm_response(extraction_messages, ExtractionOutput, model=settings.PROCUREMENT_MODEL)
+    except LLMCallFailed:
+      logger.error(f'Turn {turn_num} extraction call failed.')
+      return {'reply': "Sorry, I'm having trouble right now - could you say that again?", 'state': state, 'done': False}
 
-  try:
-    result = await get_llm_response(messages, ConversationOutput, tools=TOOLS or None, model=settings.PROCUREMENT_MODEL)
+    extracted_updates = extraction_result.updates
 
-    if not isinstance(result, ConversationOutput):
-      output = await _resolve_tool_calls(result, messages, refdata, state, turn_num)
-    else:
-      output = result
-
-  except LLMCallFailed:
-    logger.error(f'Turn {turn_num} LLM call failed.')
-    return {'reply': "Sorry, I'm having trouble right now - could you say that again?", 'state': state, 'done': False}
-
-  logger.info(f'Turn {turn_num} raw output: {output.model_dump_json()}')
+  logger.info(f'Turn {turn_num} extracted: {[u.model_dump() for u in extracted_updates]}')
 
   # apply extracted updates
-  updates, rejected_fields = apply_updates(state.claimed, output.updates, turn_num, crop_config=crop_config)
-  logger.info(f'Turn {turn_num} applied {updates}/{len(output.updates)} updates, rejected: {rejected_fields}')
-
-  # update state history
-  state.history.append(ConversationHistory(role=Role.USER, content=input))
-  state.history.append(ConversationHistory(role=Role.ASSISTANT, content=output.reply))
-  state.meta.turn_count = turn_num
+  updates, rejected_fields = apply_updates(state.claimed, extracted_updates, turn_num, crop_config=crop_config)
+  logger.info(f'Turn {turn_num} applied {updates}/{len(extracted_updates)} updates, rejected: {rejected_fields}')
   state.rejected_fields = rejected_fields
 
   # qualify (re-resolve crop config: this turn's updates may have just supplied the crop)
@@ -96,7 +93,10 @@ async def conversation(input: str, state: ConversationState, channel: str = 'voi
     confirm_prompt = build_crop_confirmation_prompt(channel=channel, crop=crop_value, farmer_input=input)
     confirm_messages = [{'role': 'system', 'content': confirm_prompt}]
     confirm_output = await get_llm_response(confirm_messages, ConversationOutput, model=settings.PROCUREMENT_MODEL)
-    state.history[-1] = ConversationHistory(role=Role.ASSISTANT, content=confirm_output.reply)
+
+    state.history.append(ConversationHistory(role=Role.USER, content=input))
+    state.history.append(ConversationHistory(role=Role.ASSISTANT, content=confirm_output.reply))
+    state.meta.turn_count = turn_num
     return {'reply': confirm_output.reply, 'state': state, 'done': False}
 
   qualified = False
@@ -106,12 +106,34 @@ async def conversation(input: str, state: ConversationState, channel: str = 'voi
     logger.info(f'Turn {turn_num} qualified: {state.qualification.verdict} - {state.qualification.reason}')
 
   done = state.qualification.is_decided() and (crop_config is None or is_done(state, crop_config))
-  if qualified and done:
-    closing_prompt = build_system_prompt(channel=channel, refdata=refdata, state=state) + CLOSING_INSTRUCTION
-    closing_messages = [{'role': 'system', 'content': closing_prompt}]
-    closing_messages += [{'role': history.role.value, 'content': history.content} for history in state.history]
-    closing_output = await get_llm_response(closing_messages, ConversationOutput, model=settings.PROCUREMENT_MODEL)
-    output = closing_output
-    state.history[-1] = ConversationHistory(role=Role.ASSISTANT, content=output.reply)
 
-  return {'reply': output.reply, 'state': state, 'done': done}
+  # --- NLG: reply generation, full transcript, record already updated above ---
+  unconfirmed_fields = unconfirmed(state.claimed, crop_config) if crop_config else list()
+  reply_prompt = build_system_prompt(channel=channel, refdata=refdata, state=state, unconfirmed_fields=unconfirmed_fields, is_opening_turn=is_opening_turn)
+  if qualified and done:
+    reply_prompt += CLOSING_INSTRUCTION
+
+  reply_messages = [{'role': 'system', 'content': reply_prompt}]
+  reply_messages += [{'role': history.role.value, 'content': history.content} for history in state.history]
+  reply_messages.append({'role': 'user', 'content': input})
+
+  try:
+    reply_result = await get_llm_response(reply_messages, ReplyOutput, tools=TOOLS or None, model=settings.PROCUREMENT_MODEL)
+
+    if not isinstance(reply_result, ReplyOutput):
+      reply_output = await _resolve_tool_calls(reply_result, reply_messages, refdata, state, turn_num, ReplyOutput)
+    else:
+      reply_output = reply_result
+
+  except LLMCallFailed:
+    logger.error(f'Turn {turn_num} reply call failed.')
+    return {'reply': "Sorry, I'm having trouble right now - could you say that again?", 'state': state, 'done': False}
+
+  logger.info(f'Turn {turn_num} reply output: {reply_output.model_dump_json()}')
+
+  # update state history - append-only, never rewritten
+  state.history.append(ConversationHistory(role=Role.USER, content=input))
+  state.history.append(ConversationHistory(role=Role.ASSISTANT, content=reply_output.reply))
+  state.meta.turn_count = turn_num
+
+  return {'reply': reply_output.reply, 'state': state, 'done': done}

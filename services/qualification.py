@@ -27,17 +27,42 @@ def qualify(record: ClaimedRecord, refdata: dict) -> Qualification:
     qualification.decide(Verdict.DECLINE, f"We don't procure {crop!r}")
     return qualification
 
+  if record.crop.needs_confirmation():
+    qualification.decide(Verdict.INCOMPLETE, 'Crop stated but not yet confirmed.')
+    return qualification
+
   # check for minimum quantity
   min_qty = crop_config.get('min_quantity', crop_defaults.get('min_quantity', 0))
   qty = record.quantity.value
-  if qty is None or qty.value is None or qty.value < min_qty:
+  if qty is None or qty.value is None:
+    qualification.decide(Verdict.INCOMPLETE, 'No quantity stated.')
+    return qualification
+
+  if record.quantity.needs_confirmation():
+    qualification.decide(Verdict.INCOMPLETE, 'Quantity stated but not yet confirmed.')
+    return qualification
+
+  if qty.value < min_qty:
     qualification.decide(Verdict.DECLINE, f'Quantity below our minimum ({min_qty} {crop_defaults.get("quantity_unit", "")})')
     return qualification
 
   # crop state
   crop_state = record.crop_state.value
+  if crop_state is None:
+    qualification.decide(Verdict.INCOMPLETE, 'No crop state stated.')
+    return qualification
+
+  if record.crop_state.needs_confirmation():
+    qualification.decide(Verdict.INCOMPLETE, 'Crop state stated but not yet confirmed.')
+    return qualification
+
   if crop_state in (CropState.STANDING, CropState.HARVESTING):
     qualification.decide(Verdict.FORWARD, f'Crop not yet available ({crop_state.value}); worth pursuing once harvested')
+    return qualification
+
+  # grade (feeds the reference price lookup below, for graded crops)
+  if 'grades' in crop_config and record.grade.needs_confirmation():
+    qualification.decide(Verdict.INCOMPLETE, 'Grade stated but not yet confirmed.')
     return qualification
 
   # price band
@@ -54,6 +79,10 @@ def qualify(record: ClaimedRecord, refdata: dict) -> Qualification:
 
   if ask_price is None or ask_price.value is None:
     qualification.decide(Verdict.INCOMPLETE, 'No asking price stated.')
+    return qualification
+
+  if record.price.needs_confirmation():
+    qualification.decide(Verdict.INCOMPLETE, 'Asking price stated but not yet confirmed.')
     return qualification
 
   if ask_price.value <= ceiling:
