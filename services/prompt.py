@@ -107,6 +107,18 @@ Output ONLY this JSON, nothing else:
 """
 
 
+GRADE_CONFIRMATION_PROMPT = """
+You are a procurement agent on a {channel_label} with a farmer. {language_context}
+
+The farmer just said: "{farmer_input}"
+
+From this, the grade they stated for their {crop} was understood to be "{grade}" — but that isn't one of the grades we track for {crop} ({valid_grades}). This may be a mishearing, or the farmer may simply not know our exact grade names. This is the ONLY thing happening this turn: do not decline, do not close the call, do not say outright that "{grade}" isn't a real grade, and do not ask about anything else (not crop_state, not location, not quantity, not price) — just ask the farmer to clarify which of our known grades applies, naming the options so they can just pick one.
+
+Output ONLY this JSON, nothing else:
+{{"updates": [], "reply": "<a short, natural spoken question, in the same language you'd otherwise reply in, equivalent in meaning to: 'Just to confirm, is that {valid_grades}?'>"}}
+"""
+
+
 CLOSING_INSTRUCTION = """
 ## This is the closing turn
 All the information needed has been gathered and a decision has been reached (see VERDICT/REASON above). Your ONLY job this turn is to close the call:
@@ -279,6 +291,16 @@ def build_crop_confirmation_prompt(channel: str, crop: str, farmer_input: str) -
   language_context = _render_language_instruction(VoiceLanguage(settings.VOICE_LANGUAGE)) if channel == 'voice' else ''
   channel_label = 'phone call' if channel == 'voice' else 'text conversation'
   return CROP_CONFIRMATION_PROMPT.format(channel_label=channel_label, language_context=language_context, farmer_input=farmer_input, crop=crop)
+
+
+def build_grade_confirmation_prompt(channel: str, crop: str, grade: str, valid_grades: list[str], farmer_input: str) -> str:
+  """
+  A short, standalone prompt for the grade confirmation.
+  """
+  language_context = _render_language_instruction(VoiceLanguage(settings.VOICE_LANGUAGE)) if channel == 'voice' else ''
+  channel_label = 'phone call' if channel == 'voice' else 'text conversation'
+  valid_grades_text = ', '.join(valid_grades[:-1]) + f', or {valid_grades[-1]}' if len(valid_grades) > 1 else valid_grades[0]
+  return GRADE_CONFIRMATION_PROMPT.format(channel_label=channel_label, language_context=language_context, farmer_input=farmer_input, crop=crop, grade=grade, valid_grades=valid_grades_text)
 
 
 def build_system_prompt(channel: str, refdata: dict, state: ConversationState, unconfirmed_fields: list[str] | None = None, is_opening_turn: bool = False) -> str:

@@ -68,7 +68,11 @@ def qualify(record: ClaimedRecord, refdata: dict) -> Qualification:
   # price band
   reference_price = _reference_price(record, crop_config)
   if reference_price is None:
-    qualification.decide(Verdict.INCOMPLETE, 'No reference market price available for the claimed grade.')
+    grade = record.grade.value
+    if grade is not None and record.grade.confirmation_asked == grade:
+      qualification.decide(Verdict.DECLINE, f"We don't have a reference price for grade {grade!r} of {crop!r}")
+    else:
+      qualification.decide(Verdict.INCOMPLETE, 'No reference market price available for the claimed grade.')
     return qualification
 
   negotiable_margin_pct = crop_config.get('negotiate_margin_pct', crop_defaults.get('negotiate_margin_pct', 0))

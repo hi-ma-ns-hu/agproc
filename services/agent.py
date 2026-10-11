@@ -5,7 +5,7 @@ from utils import LLMCallFailed, get_llm_response, get_logger
 
 from .contract import ConversationOutput, ExtractionOutput, ReplyOutput
 from .extraction import apply_updates
-from .prompt import CLOSING_INSTRUCTION, build_crop_confirmation_prompt, build_extraction_prompt, build_system_prompt
+from .prompt import CLOSING_INSTRUCTION, build_crop_confirmation_prompt, build_extraction_prompt, build_grade_confirmation_prompt, build_system_prompt
 from .qualification import qualify
 from .refdata import crop_config as config
 from .refdata import load_refdata
@@ -91,6 +91,18 @@ async def conversation(input: str, state: ConversationState, channel: str = 'voi
   if crop_value and crop_config is None and not state.qualification.is_decided() and state.claimed.crop.confirmation_asked != crop_value:
     state.claimed.crop.confirmation_asked = crop_value
     confirm_prompt = build_crop_confirmation_prompt(channel=channel, crop=crop_value, farmer_input=input)
+    confirm_messages = [{'role': 'system', 'content': confirm_prompt}]
+    confirm_output = await get_llm_response(confirm_messages, ConversationOutput, model=settings.PROCUREMENT_MODEL)
+
+    state.history.append(ConversationHistory(role=Role.USER, content=input))
+    state.history.append(ConversationHistory(role=Role.ASSISTANT, content=confirm_output.reply))
+    state.meta.turn_count = turn_num
+    return {'reply': confirm_output.reply, 'state': state, 'done': False}
+
+  grade_value = state.claimed.grade.value
+  if grade_value and crop_config is not None and 'grades' in crop_config and grade_value not in crop_config['grades'] and not state.qualification.is_decided() and state.claimed.grade.confirmation_asked != grade_value:
+    state.claimed.grade.confirmation_asked = grade_value
+    confirm_prompt = build_grade_confirmation_prompt(channel=channel, crop=crop_value, grade=grade_value, valid_grades=list(crop_config['grades']), farmer_input=input)
     confirm_messages = [{'role': 'system', 'content': confirm_prompt}]
     confirm_output = await get_llm_response(confirm_messages, ConversationOutput, model=settings.PROCUREMENT_MODEL)
 
