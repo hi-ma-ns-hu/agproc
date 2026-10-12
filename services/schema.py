@@ -99,6 +99,15 @@ class ClaimedRecord:
 
   contact: Reading = field(default_factory=Reading)
 
+  def reset_crop_dependent_fields(self):
+    """
+    Called when `crop` changes to a genuinely different, already-known value mid-call.
+    """
+    self.quantity = Reading(value=Measure())
+    self.grade = Reading()
+    self.crop_state = Reading()
+    self.price = Reading(value=Measure())
+
 
 # QUALIFICATION
 

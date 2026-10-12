@@ -58,8 +58,8 @@ async def conversation(input: str, state: ConversationState, channel: str = 'voi
   turn_num = state.meta.turn_count + 1
   logger.info(f'Turn {turn_num} input: {input}')
 
-  crop_value = state.claimed.crop.value
-  crop_config = config(crop_value, refdata) if crop_value else None
+  old_crop_value = state.claimed.crop.value
+  crop_config = config(old_crop_value, refdata) if old_crop_value else None
 
   # --- NLU: narrow extraction call, scoped to this one message ---
   if is_opening_turn:
@@ -86,6 +86,9 @@ async def conversation(input: str, state: ConversationState, channel: str = 'voi
 
   # qualify (re-resolve crop config: this turn's updates may have just supplied the crop)
   crop_value = state.claimed.crop.value
+  if old_crop_value is not None and crop_value is not None and crop_value != old_crop_value:
+    state.claimed.reset_crop_dependent_fields()
+    logger.info(f'Turn {turn_num} crop changed from {old_crop_value!r} to {crop_value!r} - reset quantity/grade/crop_state/price')
   crop_config = config(crop_value, refdata) if crop_value else None
 
   if crop_value and crop_config is None and not state.qualification.is_decided() and state.claimed.crop.confirmation_asked != crop_value:
