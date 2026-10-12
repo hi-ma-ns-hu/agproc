@@ -115,7 +115,7 @@ async def conversation(input: str, state: ConversationState, channel: str = 'voi
     return {'reply': confirm_output.reply, 'state': state, 'done': False}
 
   qualified = False
-  if crop_value and not state.qualification.is_decided() and (crop_config is None or is_completed(state.claimed, crop_config)):
+  if crop_value and (crop_config is None or is_completed(state.claimed, crop_config)):
     state.qualification = qualify(state.claimed, refdata)
     qualified = True
     logger.info(f'Turn {turn_num} qualified: {state.qualification.verdict} - {state.qualification.reason}')
