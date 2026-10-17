@@ -82,14 +82,14 @@ async def conversation(input: str, state: ConversationState, channel: str = 'voi
   # apply extracted updates
   updates, rejected_fields = apply_updates(state.claimed, extracted_updates, turn_num, crop_config=crop_config)
   logger.info(f'Turn {turn_num} applied {updates}/{len(extracted_updates)} updates, rejected: {rejected_fields}')
-  state.rejected_fields = rejected_fields
+  state.extras.rejected_fields = rejected_fields
 
   # qualify (re-resolve crop config: this turn's updates may have just supplied the crop)
   crop_value = state.claimed.crop.value
   if old_crop_value is not None and crop_value is not None and crop_value != old_crop_value:
     state.claimed.reset_crop_dependent_fields()
     state.qualification = Qualification()
-    state.crop_decline_offer_made = False
+    state.extras.crop_decline_offer_made = False
     logger.info(f'Turn {turn_num} crop changed from {old_crop_value!r} to {crop_value!r} - reset quantity/grade/crop_state/price/qualification/offer flag')
   crop_config = config(crop_value, refdata) if crop_value else None
 
@@ -107,7 +107,7 @@ async def conversation(input: str, state: ConversationState, channel: str = 'voi
   grade_value = state.claimed.grade.value
   if grade_value and crop_config is not None and 'grades' in crop_config and grade_value not in crop_config['grades'] and not state.qualification.is_decided() and state.claimed.grade.confirmation_asked != grade_value:
     state.claimed.grade.confirmation_asked = grade_value
-    state.grade_nearest_offer_made = False
+    state.extras.grade_nearest_offer_made = False
     confirm_prompt = build_grade_confirmation_prompt(channel=channel, crop=crop_value, grade=grade_value, valid_grades=list(crop_config['grades']), farmer_input=input)
     confirm_messages = [{'role': 'system', 'content': confirm_prompt}]
     confirm_output = await get_llm_response(confirm_messages, ConversationOutput, model=settings.PROCUREMENT_MODEL)
@@ -124,22 +124,22 @@ async def conversation(input: str, state: ConversationState, channel: str = 'voi
     logger.info(f'Turn {turn_num} qualified: {state.qualification.verdict} - {state.qualification.reason}')
 
   unprocurable_decline = qualified and crop_config is None and state.qualification.verdict == Verdict.DECLINE
-  offer_alternative = unprocurable_decline and not state.crop_decline_offer_made
+  offer_alternative = unprocurable_decline and not state.extras.crop_decline_offer_made
 
   unmatched_grade_decline = qualified and crop_config is not None and 'grades' in crop_config and grade_value is not None and grade_value not in crop_config['grades'] and state.qualification.verdict == Verdict.DECLINE
   nearest_grade = None
-  if unmatched_grade_decline and not state.grade_nearest_offer_made and not state.claimed.price.needs_confirmation():
+  if unmatched_grade_decline and not state.extras.grade_nearest_offer_made and not state.claimed.price.needs_confirmation():
     price_measure = state.claimed.price.value
     if price_measure is not None and price_measure.value is not None:
       nearest_grade = nearest_grade_by_price(crop_config['grades'], price_measure.value)
   offer_nearest_grade = nearest_grade is not None
 
   if offer_alternative:
-    state.crop_decline_offer_made = True
+    state.extras.crop_decline_offer_made = True
     done = False
     logger.info(f'Turn {turn_num} unprocurable crop {crop_value!r} - offering alternative crops, not closing yet')
   elif offer_nearest_grade:
-    state.grade_nearest_offer_made = True
+    state.extras.grade_nearest_offer_made = True
     done = False
     logger.info(f'Turn {turn_num} unmatched grade {grade_value!r} - offering nearest grade {nearest_grade!r} by price, not declining yet')
   else:

@@ -215,6 +215,16 @@ class ConversationHistory:
 
 
 @dataclass
+class ConversationExtras:
+  """
+  Additional extras fields.
+  """
+  rejected_fields: list[str] = field(default_factory=list)
+  crop_decline_offer_made: bool = False
+  grade_nearest_offer_made: bool = False
+
+
+@dataclass
 class ConversationState:
   """
   The full state of one procurement conversation, carried turn to turn.
@@ -224,9 +234,7 @@ class ConversationState:
   qualification: Qualification = field(default_factory=Qualification)
   meta: ConversationMeta = field(default_factory=CallMeta)
   history: list[ConversationHistory] = field(default_factory=list)
-  rejected_fields: list[str] = field(default_factory=list)
-  crop_decline_offer_made: bool = False
-  grade_nearest_offer_made: bool = False
+  extras: ConversationExtras = field(default_factory=ConversationExtras)
 
   def summary(self) -> str:
     """
