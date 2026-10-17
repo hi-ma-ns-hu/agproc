@@ -153,6 +153,20 @@ def build_crop_decline_offer_instruction(crop: str, refdata: dict) -> str:
   return CROP_DECLINE_OFFER_INSTRUCTION_TEMPLATE.format(crop=crop, crop_list=render_crop_names(refdata))
 
 
+GRADE_NEAREST_OFFER_INSTRUCTION_TEMPLATE = """
+## Unresolved grade — suggest the nearest match by price, don't decline yet
+The farmer's stated grade for {crop} ({grade!r}) doesn't match any grade we track for {crop} - but based on the price they mentioned, the closest real grade is "{nearest_grade}" (around ₹{nearest_price}/quintal). The call is NOT over. Your ONLY job this turn:
+- Mention plainly that {grade!r} isn't one of the grades we track for {crop}.
+- Ask, as a direct yes/no-style question, whether they meant "{nearest_grade}" grade instead — mention its approximate price so it's clear why you're suggesting that one specifically.
+- Do NOT decline or end the call yet, and do NOT ask about anything else this turn (not quantity, not location, not crop_state).
+"""
+
+
+def build_grade_nearest_offer_instruction(crop: str, grade: str, nearest_grade: str, crop_config: dict) -> str:
+  nearest_price = crop_config['grades'][nearest_grade]
+  return GRADE_NEAREST_OFFER_INSTRUCTION_TEMPLATE.format(crop=crop, grade=grade, nearest_grade=nearest_grade, nearest_price=nearest_price)
+
+
 EXTRACTION_PROMPT_TEMPLATE = """
 You are extracting structured updates from ONE message a farmer just sent, in a produce-procurement phone conversation. {language_context}
 

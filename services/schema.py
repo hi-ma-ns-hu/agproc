@@ -226,6 +226,7 @@ class ConversationState:
   history: list[ConversationHistory] = field(default_factory=list)
   rejected_fields: list[str] = field(default_factory=list)
   crop_decline_offer_made: bool = False
+  grade_nearest_offer_made: bool = False
 
   def summary(self) -> str:
     """

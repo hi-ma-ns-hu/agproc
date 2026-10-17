@@ -12,6 +12,15 @@ def _reference_price(record: ClaimedRecord, crop_config: dict) -> float | None:
   return crop_config.get('price')
 
 
+def nearest_grade_by_price(grades: dict, ask_price: float) -> str | None:
+  """
+  Which known grade's reference price is closest to what the farmer asked?
+  """
+  if not grades:
+    return None
+  return min(grades.items(), key=lambda kv: abs(kv[1] - ask_price))[0]
+
+
 def qualify(record: ClaimedRecord, refdata: dict) -> Qualification:
   """
   Return a verdict for a complete claimed lot.
