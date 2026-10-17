@@ -129,6 +129,30 @@ All the information needed has been gathered and a decision has been reached (se
 """
 
 
+CROP_DECLINE_OFFER_INSTRUCTION_TEMPLATE = """
+## We don't procure this crop — offer what we do, don't close yet
+The farmer's crop ({crop!r}) is not something we buy (see VERDICT/REASON above) — but the call is NOT over. Your ONLY job this turn:
+- Tell the farmer plainly and warmly that we don't currently procure {crop!r}.
+- Mention what we DO procure: {crop_list}.
+- Ask if they happen to have any of those instead.
+- Do NOT say goodbye, do NOT wrap up or end the call, and do NOT ask about anything else (not quantity, not grade, not location) — this turn is only the crop-alternative offer.
+"""
+
+
+def render_crop_names(refdata: dict) -> str:
+  """Concise comma/'or' list of just the crop names we procure - for the decline-offer ask, where render_refdata's full price/grade detail would be noise."""
+  crops = list(refdata.get('crops', {}).keys())
+  if not crops:
+    return '(nothing currently listed)'
+  if len(crops) == 1:
+    return crops[0]
+  return ', '.join(crops[:-1]) + f', or {crops[-1]}'
+
+
+def build_crop_decline_offer_instruction(crop: str, refdata: dict) -> str:
+  return CROP_DECLINE_OFFER_INSTRUCTION_TEMPLATE.format(crop=crop, crop_list=render_crop_names(refdata))
+
+
 EXTRACTION_PROMPT_TEMPLATE = """
 You are extracting structured updates from ONE message a farmer just sent, in a produce-procurement phone conversation. {language_context}
 

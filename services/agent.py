@@ -5,11 +5,11 @@ from utils import LLMCallFailed, get_llm_response, get_logger
 
 from .contract import ConversationOutput, ExtractionOutput, ReplyOutput
 from .extraction import apply_updates
-from .prompt import CLOSING_INSTRUCTION, build_crop_confirmation_prompt, build_extraction_prompt, build_grade_confirmation_prompt, build_system_prompt
+from .prompt import CLOSING_INSTRUCTION, build_crop_confirmation_prompt, build_crop_decline_offer_instruction, build_extraction_prompt, build_grade_confirmation_prompt, build_system_prompt
 from .qualification import qualify
 from .refdata import crop_config as config
 from .refdata import load_refdata
-from .schema import ConversationHistory, ConversationInitiator, ConversationState, Role
+from .schema import ConversationHistory, ConversationInitiator, ConversationState, Qualification, Role, Verdict
 from .tools import TOOLS
 from .validation import is_completed, is_done, unconfirmed
 
@@ -88,7 +88,9 @@ async def conversation(input: str, state: ConversationState, channel: str = 'voi
   crop_value = state.claimed.crop.value
   if old_crop_value is not None and crop_value is not None and crop_value != old_crop_value:
     state.claimed.reset_crop_dependent_fields()
-    logger.info(f'Turn {turn_num} crop changed from {old_crop_value!r} to {crop_value!r} - reset quantity/grade/crop_state/price')
+    state.qualification = Qualification()
+    state.crop_decline_offer_made = False
+    logger.info(f'Turn {turn_num} crop changed from {old_crop_value!r} to {crop_value!r} - reset quantity/grade/crop_state/price/qualification/offer flag')
   crop_config = config(crop_value, refdata) if crop_value else None
 
   if crop_value and crop_config is None and not state.qualification.is_decided() and state.claimed.crop.confirmation_asked != crop_value:
@@ -120,12 +122,22 @@ async def conversation(input: str, state: ConversationState, channel: str = 'voi
     qualified = True
     logger.info(f'Turn {turn_num} qualified: {state.qualification.verdict} - {state.qualification.reason}')
 
-  done = state.qualification.is_decided() and (crop_config is None or is_done(state, crop_config))
+  unprocurable_decline = qualified and crop_config is None and state.qualification.verdict == Verdict.DECLINE
+  offer_alternative = unprocurable_decline and not state.crop_decline_offer_made
+
+  if offer_alternative:
+    state.crop_decline_offer_made = True
+    done = False
+    logger.info(f'Turn {turn_num} unprocurable crop {crop_value!r} - offering alternative crops, not closing yet')
+  else:
+    done = state.qualification.is_decided() and (crop_config is None or is_done(state, crop_config))
 
   # --- NLG: reply generation, full transcript, record already updated above ---
   unconfirmed_fields = unconfirmed(state.claimed, crop_config) if crop_config else list()
   reply_prompt = build_system_prompt(channel=channel, refdata=refdata, state=state, unconfirmed_fields=unconfirmed_fields, is_opening_turn=is_opening_turn)
-  if qualified and done:
+  if offer_alternative:
+    reply_prompt += build_crop_decline_offer_instruction(crop_value, refdata)
+  elif qualified and done:
     reply_prompt += CLOSING_INSTRUCTION
 
   reply_messages = [{'role': 'system', 'content': reply_prompt}]
