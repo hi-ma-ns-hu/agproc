@@ -10,7 +10,7 @@ from typing import Any
 
 from config import settings
 
-from .tracing import init_tracing
+from .tracing import get_tracer, init_tracing
 
 # ── Per-request context (async-safe via ContextVar) ───────────────────────────
 
@@ -48,7 +48,7 @@ class JSONFormatter(logging.Formatter):
     level       DEBUG / INFO / WARNING / ERROR / CRITICAL
     logger      module path e.g. "services.qa_engine.service"
     message     the log message
-    service     "AgProc"
+    service     "agproc"
     env         development / staging / production
 
   Added from bind_context() when present:
@@ -64,7 +64,7 @@ class JSONFormatter(logging.Formatter):
       'level': record.levelname,
       'logger': record.name,
       'message': record.getMessage(),
-      'service': 'AgProc',
+      'service': 'agproc',
       'env': settings.APP_ENV,
     }
 
@@ -129,9 +129,14 @@ def configure_logging() -> None:
   root.setLevel(getattr(logging, settings.LOG_LEVEL))
   root.handlers.clear()
 
-  json_handler = logging.StreamHandler(sys.stdout)
-  json_handler.setFormatter(JSONFormatter())
-  root.addHandler(json_handler)
+  stream_handler = logging.StreamHandler(sys.stdout)
+  stream_handler.setFormatter(JSONFormatter())
+  root.addHandler(stream_handler)
+
+  # Alloy (running in its own container) can't see this process's stdout - it tails this file instead, so every log line also needs to land on disk.
+  file_handler = logging.FileHandler('logs/agproc.jsonl')
+  file_handler.setFormatter(JSONFormatter())
+  root.addHandler(file_handler)
 
   # Silence noisy libraries
   logging.getLogger('sqlalchemy.engine').setLevel(logging.DEBUG if settings.IS_DEVELOPMENT else logging.WARNING)
@@ -139,8 +144,6 @@ def configure_logging() -> None:
   logging.getLogger('httpcore').setLevel(logging.WARNING)
   logging.getLogger('uvicorn.access').setLevel(logging.WARNING)
   logging.getLogger('celery').setLevel(logging.INFO)
-  # uncomment it later when metric compatible aggregators are integrated
-  logging.getLogger('opentelemetry.exporter.otlp.proto.http.metric_exporter').setLevel(logging.CRITICAL)
 
 
 # ── Convenience wrapper ───────────────────────────────────────────────────────
@@ -175,8 +178,9 @@ class BoundLogger:
   def info(self, msg: str, **fields: Any) -> None:
     self._log(logging.INFO, msg, **fields)
 
-  def warning(self, msg: str, **fields: Any) -> None:
-    self._log(logging.WARNING, msg, **fields)
+  def warning(self, msg: str, exc_info: bool = False, **fields: Any) -> None:
+    if self._logger.isEnabledFor(logging.WARNING):
+      self._logger.log(logging.WARNING, msg, exc_info=exc_info, extra=fields if fields else None)
 
   def error(self, msg: str, exc_info: bool = False, **fields: Any) -> None:
     if self._logger.isEnabledFor(logging.ERROR):
@@ -198,4 +202,4 @@ def get_logger(name: str) -> BoundLogger:
   return BoundLogger(name)
 
 
-__all__ = ['configure_logging', 'get_logger', 'bind_context', 'clear_context', 'init_tracing']
+__all__ = ['configure_logging', 'get_logger', 'bind_context', 'clear_context', 'init_tracing', 'get_tracer']

@@ -1,4 +1,5 @@
 import asyncio
+import time
 
 from openai import APIError, APITimeoutError, AsyncOpenAI, RateLimitError
 from pydantic import BaseModel, ValidationError
@@ -37,6 +38,7 @@ async def get_llm_response(messages: list[dict], response_model: type[BaseModel]
   client = get_llm_client()
   error: Exception | None = None
   for attempt in range(1, max_retries + 2):
+    t0 = time.perf_counter()
     try:
       kwargs = {'model': model, 'messages': messages, 'response_format': response_model, 'temperature': temperature}
       if tools:
@@ -45,22 +47,27 @@ async def get_llm_response(messages: list[dict], response_model: type[BaseModel]
       response = await client.beta.chat.completions.parse(**kwargs)
 
       message = response.choices[0].message
+      duration_ms = round((time.perf_counter() - t0) * 1000)
 
       if tools and message.tool_calls:
+        logger.info('llm.response', model=model, duration_ms=duration_ms, attempt=attempt, tool_call=True)
         return message
 
       if message.parsed is None:
         raise ValidationError.from_exception_data('Empty structured response', [])
+
+      logger.info('llm.response', model=model, duration_ms=duration_ms, attempt=attempt, tool_call=False)
       return message.parsed
 
     except (RateLimitError, APITimeoutError, APIError) as err:
       error = err
-      logger.warning(f'LLM call attempt {attempt} failed {type(err).__name__}, err')
+      logger.warning('llm.retry', model=model, attempt=attempt, error_type=type(err).__name__, error=str(err))
       await asyncio.sleep(0.5 * attempt)
 
     except ValidationError as err:
       error = err
-      logger.warning(f'LLM call attempt {attempt} returned invalid. structure: {err}')
+      logger.warning('llm.invalid_response', model=model, attempt=attempt, error=str(err))
       await asyncio.sleep(0.5 * attempt)
 
+  logger.error('llm.failed', model=model, attempts=max_retries + 1, error=str(error))
   raise LLMCallFailed(f'LLM call failed after {max_retries + 1} attempts: {error}') from error

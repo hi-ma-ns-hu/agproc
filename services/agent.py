@@ -1,7 +1,7 @@
 import json
 
 from config import settings
-from utils import LLMCallFailed, get_llm_response, get_logger
+from utils import LLMCallFailed, get_llm_response, get_logger, get_tracer
 
 from .contract import ConversationOutput, ExtractionOutput, ReplyOutput
 from .extraction import apply_updates
@@ -14,12 +14,14 @@ from .tools import TOOLS
 from .validation import is_completed, is_done, unconfirmed
 
 logger = get_logger(__name__)
+tracer = get_tracer(__name__)
 
 
-def build_conversation_state(direction: str) -> ConversationState:
+def build_conversation_state(conversation_id: str, direction: str = 'inbound') -> ConversationState:
   """Build the initial state for one call, given who initiated it ('inbound' or 'outbound')."""
   state = ConversationState()
   state.meta.initiated_by = ConversationInitiator.US if direction == 'outbound' else ConversationInitiator.THEM
+  state.meta.conversation_id = conversation_id
   return state
 
 
@@ -35,7 +37,7 @@ async def _resolve_tool_calls(message, messages: list[dict], refdata: dict, stat
     args = json.loads(tool_call.function.arguments)
     result_txt = _execute_tool(tool_call.function.name, args, refdata)
 
-    logger.info(f'Turn {turn_num} tool call: {tool_call.function.name}({tool_call.function.arguments}) -> {result_txt}')
+    logger.info('tool.call', turn=turn_num, tool=tool_call.function.name, args=tool_call.function.arguments, result=result_txt)
 
     messages.append({'role': 'assistant', 'tool_calls': [{'id': tool_call.id, 'type': 'function', 'function': {'name': tool_call.function.name, 'arguments': tool_call.function.arguments}}]})
     messages.append({'role': 'tool', 'tool_call_id': tool_call.id, 'content': result_txt})
@@ -56,126 +58,133 @@ async def conversation(input: str, state: ConversationState, channel: str = 'voi
   """
   refdata = load_refdata()
   turn_num = state.meta.turn_count + 1
-  logger.info(f'Turn {turn_num} input: {input}')
+  logger.info('turn.input', turn=turn_num, input=input)
 
-  old_crop_value = state.claimed.crop.value
-  crop_config = config(old_crop_value, refdata) if old_crop_value else None
+  with tracer.start_as_current_span('agent.turn', attributes={'turn': turn_num, 'channel': channel}):
+    old_crop_value = state.claimed.crop.value
+    crop_config = config(old_crop_value, refdata) if old_crop_value else None
 
-  # --- NLU: narrow extraction call, scoped to this one message ---
-  if is_opening_turn:
-    extracted_updates = list()
-  else:
-    last_question = state.history[-1].content if state.history else None
-    extraction_prompt = build_extraction_prompt(channel=channel, refdata=refdata, record=state.claimed, last_question=last_question, farmer_input=input)
-    extraction_messages = [{'role': 'system', 'content': extraction_prompt}, {'role': 'user', 'content': input}]
+    # --- NLU: narrow extraction call, scoped to this one message ---
+    if is_opening_turn:
+      extracted_updates = list()
+    else:
+      last_question = state.history[-1].content if state.history else None
+      extraction_prompt = build_extraction_prompt(channel=channel, refdata=refdata, record=state.claimed, last_question=last_question, farmer_input=input)
+      extraction_messages = [{'role': 'system', 'content': extraction_prompt}, {'role': 'user', 'content': input}]
+
+      try:
+        with tracer.start_as_current_span('agent.extraction'):
+          extraction_result = await get_llm_response(extraction_messages, ExtractionOutput, model=settings.PROCUREMENT_MODEL)
+      except LLMCallFailed:
+        logger.error('turn.extraction_failed', turn=turn_num, exc_info=True)
+        return {'reply': "Sorry, I'm having trouble right now - could you say that again?", 'state': state, 'done': False}
+
+      extracted_updates = extraction_result.updates
+
+    logger.info('turn.extracted', turn=turn_num, updates=[u.model_dump() for u in extracted_updates])
+
+    # apply extracted updates
+    updates, rejected_fields = apply_updates(state.claimed, extracted_updates, turn_num, crop_config=crop_config)
+    logger.info('turn.updates_applied', turn=turn_num, applied=updates, total=len(extracted_updates), rejected=rejected_fields)
+    state.extras.rejected_fields = rejected_fields
+
+    # qualify (re-resolve crop config: this turn's updates may have just supplied the crop)
+    crop_value = state.claimed.crop.value
+    if old_crop_value is not None and crop_value is not None and crop_value != old_crop_value:
+      state.claimed.reset_crop_dependent_fields()
+      state.qualification = Qualification()
+      state.extras.crop_decline_offer_made = False
+      logger.info('turn.crop_changed', turn=turn_num, from_crop=old_crop_value, to_crop=crop_value)
+    crop_config = config(crop_value, refdata) if crop_value else None
+
+    if crop_value and crop_config is None and not state.qualification.is_decided() and state.claimed.crop.confirmation_asked != crop_value:
+      state.claimed.crop.confirmation_asked = crop_value
+      confirm_prompt = build_crop_confirmation_prompt(channel=channel, crop=crop_value, farmer_input=input)
+      confirm_messages = [{'role': 'system', 'content': confirm_prompt}]
+      with tracer.start_as_current_span('agent.crop_confirmation'):
+        confirm_output = await get_llm_response(confirm_messages, ConversationOutput, model=settings.PROCUREMENT_MODEL)
+
+      logger.info('turn.crop_confirmation_asked', turn=turn_num, crop=crop_value)
+      state.history.append(ConversationHistory(role=Role.USER, content=input))
+      state.history.append(ConversationHistory(role=Role.ASSISTANT, content=confirm_output.reply))
+      state.meta.turn_count = turn_num
+      return {'reply': confirm_output.reply, 'state': state, 'done': False}
+
+    grade_value = state.claimed.grade.value
+    if grade_value and crop_config is not None and 'grades' in crop_config and grade_value not in crop_config['grades'] and not state.qualification.is_decided() and state.claimed.grade.confirmation_asked != grade_value:
+      state.claimed.grade.confirmation_asked = grade_value
+      state.extras.grade_nearest_offer_made = False
+      confirm_prompt = build_grade_confirmation_prompt(channel=channel, crop=crop_value, grade=grade_value, valid_grades=list(crop_config['grades']), farmer_input=input)
+      confirm_messages = [{'role': 'system', 'content': confirm_prompt}]
+      with tracer.start_as_current_span('agent.grade_confirmation'):
+        confirm_output = await get_llm_response(confirm_messages, ConversationOutput, model=settings.PROCUREMENT_MODEL)
+
+      logger.info('turn.grade_confirmation_asked', turn=turn_num, crop=crop_value, grade=grade_value)
+      state.history.append(ConversationHistory(role=Role.USER, content=input))
+      state.history.append(ConversationHistory(role=Role.ASSISTANT, content=confirm_output.reply))
+      state.meta.turn_count = turn_num
+      return {'reply': confirm_output.reply, 'state': state, 'done': False}
+
+    qualified = False
+    if crop_value and (crop_config is None or is_completed(state.claimed, crop_config)):
+      state.qualification = qualify(state.claimed, refdata)
+      qualified = True
+      logger.info('turn.qualified', turn=turn_num, verdict=state.qualification.verdict.value, reason=state.qualification.reason)
+
+    unprocurable_decline = qualified and crop_config is None and state.qualification.verdict == Verdict.DECLINE
+    offer_alternative = unprocurable_decline and not state.extras.crop_decline_offer_made
+
+    unmatched_grade_decline = qualified and crop_config is not None and 'grades' in crop_config and grade_value is not None and grade_value not in crop_config['grades'] and state.qualification.verdict == Verdict.DECLINE
+    nearest_grade = None
+    if unmatched_grade_decline and not state.extras.grade_nearest_offer_made and not state.claimed.price.needs_confirmation():
+      price_measure = state.claimed.price.value
+      if price_measure is not None and price_measure.value is not None:
+        nearest_grade = nearest_grade_by_price(crop_config['grades'], price_measure.value)
+    offer_nearest_grade = nearest_grade is not None
+
+    if offer_alternative:
+      state.extras.crop_decline_offer_made = True
+      done = False
+      logger.info('turn.crop_decline_offer', turn=turn_num, crop=crop_value)
+    elif offer_nearest_grade:
+      state.extras.grade_nearest_offer_made = True
+      done = False
+      logger.info('turn.grade_nearest_offer', turn=turn_num, crop=crop_value, asked_grade=grade_value, offered_grade=nearest_grade)
+    else:
+      done = state.qualification.is_decided() and (crop_config is None or is_done(state, crop_config))
+
+    # --- NLG: reply generation, full transcript, record already updated above ---
+    unconfirmed_fields = unconfirmed(state.claimed, crop_config) if crop_config else list()
+    reply_prompt = build_system_prompt(channel=channel, refdata=refdata, state=state, unconfirmed_fields=unconfirmed_fields, is_opening_turn=is_opening_turn)
+    if offer_alternative:
+      reply_prompt += build_crop_decline_offer_instruction(crop_value, refdata)
+    elif offer_nearest_grade:
+      reply_prompt += build_grade_nearest_offer_instruction(crop_value, grade_value, nearest_grade, crop_config)
+    elif qualified and done:
+      reply_prompt += CLOSING_INSTRUCTION
+
+    reply_messages = [{'role': 'system', 'content': reply_prompt}]
+    reply_messages += [{'role': history.role.value, 'content': history.content} for history in state.history]
+    reply_messages.append({'role': 'user', 'content': input})
 
     try:
-      extraction_result = await get_llm_response(extraction_messages, ExtractionOutput, model=settings.PROCUREMENT_MODEL)
+      with tracer.start_as_current_span('agent.reply'):
+        reply_result = await get_llm_response(reply_messages, ReplyOutput, tools=TOOLS or None, model=settings.PROCUREMENT_MODEL)
+
+        if not isinstance(reply_result, ReplyOutput):
+          reply_output = await _resolve_tool_calls(reply_result, reply_messages, refdata, state, turn_num, ReplyOutput)
+        else:
+          reply_output = reply_result
+
     except LLMCallFailed:
-      logger.error(f'Turn {turn_num} extraction call failed.')
+      logger.error('turn.reply_failed', turn=turn_num, exc_info=True)
       return {'reply': "Sorry, I'm having trouble right now - could you say that again?", 'state': state, 'done': False}
 
-    extracted_updates = extraction_result.updates
+    logger.info('turn.reply', turn=turn_num, reply=reply_output.reply, done=done)
 
-  logger.info(f'Turn {turn_num} extracted: {[u.model_dump() for u in extracted_updates]}')
-
-  # apply extracted updates
-  updates, rejected_fields = apply_updates(state.claimed, extracted_updates, turn_num, crop_config=crop_config)
-  logger.info(f'Turn {turn_num} applied {updates}/{len(extracted_updates)} updates, rejected: {rejected_fields}')
-  state.extras.rejected_fields = rejected_fields
-
-  # qualify (re-resolve crop config: this turn's updates may have just supplied the crop)
-  crop_value = state.claimed.crop.value
-  if old_crop_value is not None and crop_value is not None and crop_value != old_crop_value:
-    state.claimed.reset_crop_dependent_fields()
-    state.qualification = Qualification()
-    state.extras.crop_decline_offer_made = False
-    logger.info(f'Turn {turn_num} crop changed from {old_crop_value!r} to {crop_value!r} - reset quantity/grade/crop_state/price/qualification/offer flag')
-  crop_config = config(crop_value, refdata) if crop_value else None
-
-  if crop_value and crop_config is None and not state.qualification.is_decided() and state.claimed.crop.confirmation_asked != crop_value:
-    state.claimed.crop.confirmation_asked = crop_value
-    confirm_prompt = build_crop_confirmation_prompt(channel=channel, crop=crop_value, farmer_input=input)
-    confirm_messages = [{'role': 'system', 'content': confirm_prompt}]
-    confirm_output = await get_llm_response(confirm_messages, ConversationOutput, model=settings.PROCUREMENT_MODEL)
-
+    # update state history - append-only, never rewritten
     state.history.append(ConversationHistory(role=Role.USER, content=input))
-    state.history.append(ConversationHistory(role=Role.ASSISTANT, content=confirm_output.reply))
+    state.history.append(ConversationHistory(role=Role.ASSISTANT, content=reply_output.reply))
     state.meta.turn_count = turn_num
-    return {'reply': confirm_output.reply, 'state': state, 'done': False}
 
-  grade_value = state.claimed.grade.value
-  if grade_value and crop_config is not None and 'grades' in crop_config and grade_value not in crop_config['grades'] and not state.qualification.is_decided() and state.claimed.grade.confirmation_asked != grade_value:
-    state.claimed.grade.confirmation_asked = grade_value
-    state.extras.grade_nearest_offer_made = False
-    confirm_prompt = build_grade_confirmation_prompt(channel=channel, crop=crop_value, grade=grade_value, valid_grades=list(crop_config['grades']), farmer_input=input)
-    confirm_messages = [{'role': 'system', 'content': confirm_prompt}]
-    confirm_output = await get_llm_response(confirm_messages, ConversationOutput, model=settings.PROCUREMENT_MODEL)
-
-    state.history.append(ConversationHistory(role=Role.USER, content=input))
-    state.history.append(ConversationHistory(role=Role.ASSISTANT, content=confirm_output.reply))
-    state.meta.turn_count = turn_num
-    return {'reply': confirm_output.reply, 'state': state, 'done': False}
-
-  qualified = False
-  if crop_value and (crop_config is None or is_completed(state.claimed, crop_config)):
-    state.qualification = qualify(state.claimed, refdata)
-    qualified = True
-    logger.info(f'Turn {turn_num} qualified: {state.qualification.verdict} - {state.qualification.reason}')
-
-  unprocurable_decline = qualified and crop_config is None and state.qualification.verdict == Verdict.DECLINE
-  offer_alternative = unprocurable_decline and not state.extras.crop_decline_offer_made
-
-  unmatched_grade_decline = qualified and crop_config is not None and 'grades' in crop_config and grade_value is not None and grade_value not in crop_config['grades'] and state.qualification.verdict == Verdict.DECLINE
-  nearest_grade = None
-  if unmatched_grade_decline and not state.extras.grade_nearest_offer_made and not state.claimed.price.needs_confirmation():
-    price_measure = state.claimed.price.value
-    if price_measure is not None and price_measure.value is not None:
-      nearest_grade = nearest_grade_by_price(crop_config['grades'], price_measure.value)
-  offer_nearest_grade = nearest_grade is not None
-
-  if offer_alternative:
-    state.extras.crop_decline_offer_made = True
-    done = False
-    logger.info(f'Turn {turn_num} unprocurable crop {crop_value!r} - offering alternative crops, not closing yet')
-  elif offer_nearest_grade:
-    state.extras.grade_nearest_offer_made = True
-    done = False
-    logger.info(f'Turn {turn_num} unmatched grade {grade_value!r} - offering nearest grade {nearest_grade!r} by price, not declining yet')
-  else:
-    done = state.qualification.is_decided() and (crop_config is None or is_done(state, crop_config))
-
-  # --- NLG: reply generation, full transcript, record already updated above ---
-  unconfirmed_fields = unconfirmed(state.claimed, crop_config) if crop_config else list()
-  reply_prompt = build_system_prompt(channel=channel, refdata=refdata, state=state, unconfirmed_fields=unconfirmed_fields, is_opening_turn=is_opening_turn)
-  if offer_alternative:
-    reply_prompt += build_crop_decline_offer_instruction(crop_value, refdata)
-  elif offer_nearest_grade:
-    reply_prompt += build_grade_nearest_offer_instruction(crop_value, grade_value, nearest_grade, crop_config)
-  elif qualified and done:
-    reply_prompt += CLOSING_INSTRUCTION
-
-  reply_messages = [{'role': 'system', 'content': reply_prompt}]
-  reply_messages += [{'role': history.role.value, 'content': history.content} for history in state.history]
-  reply_messages.append({'role': 'user', 'content': input})
-
-  try:
-    reply_result = await get_llm_response(reply_messages, ReplyOutput, tools=TOOLS or None, model=settings.PROCUREMENT_MODEL)
-
-    if not isinstance(reply_result, ReplyOutput):
-      reply_output = await _resolve_tool_calls(reply_result, reply_messages, refdata, state, turn_num, ReplyOutput)
-    else:
-      reply_output = reply_result
-
-  except LLMCallFailed:
-    logger.error(f'Turn {turn_num} reply call failed.')
-    return {'reply': "Sorry, I'm having trouble right now - could you say that again?", 'state': state, 'done': False}
-
-  logger.info(f'Turn {turn_num} reply output: {reply_output.model_dump_json()}')
-
-  # update state history - append-only, never rewritten
-  state.history.append(ConversationHistory(role=Role.USER, content=input))
-  state.history.append(ConversationHistory(role=Role.ASSISTANT, content=reply_output.reply))
-  state.meta.turn_count = turn_num
-
-  return {'reply': reply_output.reply, 'state': state, 'done': done}
+    return {'reply': reply_output.reply, 'state': state, 'done': done}

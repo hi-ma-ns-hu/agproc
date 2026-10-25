@@ -1,6 +1,13 @@
 import asyncio
+import uuid
 
-from services import build_conversation_state, conversation
+from utils import configure_logging, init_tracing
+
+# configure logging and tracing once at startup, before any traced client is used
+configure_logging()
+init_tracing()
+
+from services import build_conversation_state, conversation  # noqa: E402
 
 
 async def run():
@@ -12,7 +19,7 @@ async def run():
   print('Type as the farmer. /quit to exit. /state to dump state anytime.')
   print('=' * 60)
 
-  state = build_conversation_state(direction)
+  state = build_conversation_state(f'harness-{uuid.uuid4().hex[:8]}', direction)
 
   if direction == 'outbound':
     result = await conversation('', state, channel='voice', is_opening_turn=True)

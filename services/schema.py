@@ -181,6 +181,7 @@ class ConversationMeta:
   channel: ConversationChannel = ConversationChannel.VOICE
   initiated_by: ConversationInitiator = ConversationInitiator.US
   turn_count: int = 0
+  conversation_id: str | None = None  # message/call id of the conversation
 
 
 @dataclass

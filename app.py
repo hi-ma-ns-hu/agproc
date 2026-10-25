@@ -28,6 +28,9 @@ logger = get_logger(__name__)
 _active_requests: int = 0
 _shutting_down: bool = False
 
+# Polled every few seconds by the load balancer/orchestrator - excluded from the access log entirely.
+_HEALTH_PATHS = frozenset({'/health', '/health/ready'})
+
 
 def _handle_sigterm(*_) -> None:
   global _shutting_down
@@ -41,7 +44,7 @@ signal.signal(signal.SIGTERM, _handle_sigterm)
 # lifespan
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-  logger.info('AgProc starting', env=settings.APP_ENV)
+  logger.info('AgProc starting', env=settings.APP_ENV, version=app.version, log_level=settings.LOG_LEVEL, redis_enabled=REDIS_ENABLED)
 
   # from services import SlackAdapter, set_slack
   # set_slack(await SlackAdapter().initialize())
@@ -82,6 +85,7 @@ def _add_health_routes(app: FastAPI) -> None:
         checks['redis'] = 'ok'
       except Exception as e:
         checks['redis'] = f'error: {e}'
+        logger.warning('health.check_failed', component='redis', exc_info=True)
 
     try:
       async with engine.connect() as conn:
@@ -89,6 +93,7 @@ def _add_health_routes(app: FastAPI) -> None:
       checks['database'] = 'ok'
     except Exception as e:
       checks['database'] = f'error: {e}'
+      logger.warning('health.check_failed', component='database', exc_info=True)
 
     ok = all(v in ('ok', 'disabled') for v in checks.values())
     return JSONResponse(
@@ -115,7 +120,8 @@ def _add_trace_middleware(app: FastAPI) -> None:
     finally:
       _active_requests -= 1
       duration_ms = round((time.perf_counter() - t0) * 1000)
-      logger.info('http', status=response.status_code if response else 500, duration_ms=duration_ms)
+      if request.url.path not in _HEALTH_PATHS:
+        logger.info('http', status=response.status_code if response else 500, duration_ms=duration_ms)
       clear_context()
     return response
 

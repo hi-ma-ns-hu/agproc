@@ -3,6 +3,10 @@ from pathlib import Path
 
 import yaml
 
+from utils import get_logger
+
+logger = get_logger(__name__)
+
 _CURR_DIR = Path(__file__).parent
 _SAMPLE_REFDATA = _CURR_DIR / 'refdata.sample.yml'
 _REAL_REFDATA = _CURR_DIR / 'refdata.yml'
@@ -13,9 +17,17 @@ def load_refdata() -> dict:
   """
   Load reference data once per process.
   """
-  path = _REAL_REFDATA if _REAL_REFDATA.exists() else _SAMPLE_REFDATA
+  if _REAL_REFDATA.exists():
+    path = _REAL_REFDATA
+  else:
+    path = _SAMPLE_REFDATA
+    logger.warning('refdata.sample_fallback', path=str(path))
+
   with open(path, encoding='utf-8') as f:
-    return yaml.safe_load(f)
+    data = yaml.safe_load(f)
+
+  logger.info('refdata.loaded', path=str(path), crops=list(data.get('crops', {})))
+  return data
 
 
 def clear_refdata():

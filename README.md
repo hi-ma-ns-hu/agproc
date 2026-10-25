@@ -148,7 +148,7 @@ See [`.env.example`](.env.example) / [`config.py`](config.py).
 | `LOG_LEVEL` | stdlib logging level (default `INFO`) |
 | `REDIS_URL` | enables the shared Redis pool; unset = safe no-op, app runs cache-less |
 | `DATABASE_URL` | **required** — Postgres connection string (`postgresql+asyncpg://...`); no fallback, app won't boot without it |
-| `TRACELOOP_API_ENDPOINT` | **required** — OTLP HTTP endpoint for OpenLLMetry/OTel tracing (e.g. a local Jaeger instance); no fallback, app won't boot without it |
+| `TRACELOOP_API_ENDPOINT` | **required** — OTLP HTTP endpoint for OpenLLMetry/OTel tracing (points at the shared `hi-ma-ns-hu/observability` stack's Tempo); no fallback, app won't boot without it |
 | `OPENAI_API_KEY` | **required** — used by `utils/llm/client.py`'s `AsyncOpenAI` client; no fallback, app won't boot without it |
 | `PROCUREMENT_MODEL` | OpenAI model used for conversation turns (default `gpt-4o`) |
 | `SARVAM_API_KEY` | **required** — Sarvam STT/TTS, used by `services/voice/provider.py`; no fallback, app won't boot without it |
@@ -172,28 +172,26 @@ prices, grades, and per-crop margins/minimums go; the sample file is just enough
 
 ## Tracing locally
 
-Tracing needs a backend to actually look at — a raw OTLP export isn't human-readable. **Jaeger**
-is the easiest one to run just for local dev (single binary, OTLP receiver + UI bundled, no
-Docker required — Docker's daemon is real overhead if you don't need it elsewhere):
+Tracing needs a backend to actually look at — a raw OTLP export isn't human-readable. This repo
+no longer runs a standalone local backend (the old approach was a single Jaeger binary, in-memory,
+traces-only) — instead it points at the shared **`hi-ma-ns-hu/observability`** stack (Docker
+Compose: Prometheus, Loki, Tempo, Grafana, Alloy), which is meant to be reused across all ag*
+projects, not just this one:
 
-1. Download the `jaeger-<version>-linux-amd64.tar.gz` binary from the
-   [Jaeger releases page](https://github.com/jaegertracing/jaeger/releases), extract it.
-2. Run it with no arguments — it defaults to an all-in-one setup with in-memory storage:
-   ```bash
-   ./jaeger
-   ```
-3. Set `TRACELOOP_API_ENDPOINT=http://localhost:4318` in `.env` (already the default there).
-4. Run the app, hit a route, then open http://localhost:16686 and search for the `agproc` service.
+1. Clone `hi-ma-ns-hu/observability` as a sibling directory, add a `.env` with
+   `GRAFANA_ADMIN_PASSWORD` set, and run `docker compose up -d` there (see that repo's own README).
+   It's meant to run persistently, independent of this app's own dev sessions.
+2. Set `TRACELOOP_API_ENDPOINT=http://localhost:4318` in `.env` (already the default there) —
+   Tempo accepts OTLP directly on that port.
+3. Run the app, hit a route or drive a call, then open http://localhost:3000 (Grafana), search
+   Explore → Tempo for the `agproc` service.
 
 Notes:
-- Storage is in-memory — restarting Jaeger wipes all traces. Fine for local dev, not for keeping
-  a history.
-- Jaeger only handles traces, not logs or metrics. `Traceloop.init()` also tries to export
-  metrics (token usage, request duration, etc. — e.g. `gen_ai.client.token.usage`); those have
-  nowhere to land against Jaeger and fail with a harmless 404. A metrics backend (Prometheus, or
-  Grafana Mimir) is a separate piece to add later if that data becomes useful.
-- The same `TRACELOOP_API_ENDPOINT` mechanism works against any OTLP-compatible backend — swap
-  in Grafana Tempo (or whatever prod uses) by pointing the env var elsewhere; no code changes.
+- Data is persisted (14-day retention) and also accepts
+  metrics and logs, not just traces — see that repo's README for `TRACELOOP_METRICS_ENDPOINT` and
+  the log-shipping setup, both still pending on this app's side (tracked under issue #24).
+- The same `TRACELOOP_API_ENDPOINT` mechanism works against any OTLP-compatible backend — swapping
+  backends is just an env var change, no code changes.
 
 ---
 
@@ -222,8 +220,6 @@ actual code that needs them, not before:
 
 - **Type checking** (pyright/mypy) — worth adding once `routers/` has real logic with
   non-trivial data shapes to check. Ruff does not type-check.
-- **Metrics backend** (Prometheus/Grafana Mimir) — `Traceloop.init()` already emits metrics
-  (token usage, operation duration, ...); nothing currently collects them.
 - **Messaging channel routes** — the `voice` channel is wired end-to-end (`routers/voice.py`,
   Twilio + pipecat); `messaging` only exists as a code path in `services/prompt.py`'s
   `CHANNEL_CONTEXT` and isn't connected to any actual messaging provider (WhatsApp, SMS, ...) yet.

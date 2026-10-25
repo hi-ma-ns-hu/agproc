@@ -52,7 +52,7 @@ def _validate_crop_state(raw) -> CropState | None:
 def apply_update(record: ClaimedRecord, update: ExtractedField, turn: int, crop_config: dict | None = None) -> tuple[bool, str | None]:
   """Validate and apply one extracted field update to the record."""
   if update.field == 'grade' and crop_config is not None and 'grades' not in crop_config:
-    logger.warning('Update rejected: grade not allowed for ungraded crop.')
+    logger.info('update.rejected', turn=turn, field=update.field, value=update.value, reason='grade not allowed for ungraded crop')
     return False, 'Grade not allowed for ungraded crop'
 
   if update.field in ('quantity', 'price'):
@@ -69,7 +69,7 @@ def apply_update(record: ClaimedRecord, update: ExtractedField, turn: int, crop_
       reason = 'The value is empty or None.'
 
   if value is None:
-    logger.warning(f'Update rejected: {update.field} -> {update.value} invalid.')
+    logger.info('update.rejected', turn=turn, field=update.field, value=update.value, reason=reason)
     return False, reason
 
   field: Reading = getattr(record, update.field)
