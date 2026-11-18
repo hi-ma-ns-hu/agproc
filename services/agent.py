@@ -1,4 +1,5 @@
 import json
+import re
 
 from config import settings
 from utils import LLMCallFailed, get_llm_response, get_logger, get_tracer
@@ -15,6 +16,18 @@ from .validation import is_completed, is_done, unconfirmed
 
 logger = get_logger(__name__)
 tracer = get_tracer(__name__)
+
+_TRAILING_JSON_SYNTAX = re.compile(r'["\}\],]+\s*$')
+
+
+_STRAY_BRACKETS = re.compile(r'[\{\}\[\]]')
+
+
+def _clean_reply(text: str) -> str:
+  cleaned = _TRAILING_JSON_SYNTAX.sub('', text).rstrip()
+  if _STRAY_BRACKETS.search(cleaned):
+    logger.warning('reply.suspicious_syntax', reply=cleaned)
+  return cleaned
 
 
 def build_conversation_state(conversation_id: str, direction: str = 'inbound') -> ConversationState:
@@ -103,6 +116,7 @@ async def conversation(input: str, state: ConversationState, channel: str = 'voi
       confirm_messages = [{'role': 'system', 'content': confirm_prompt}]
       with tracer.start_as_current_span('agent.crop_confirmation'):
         confirm_output = await get_llm_response(confirm_messages, ConversationOutput, model=settings.PROCUREMENT_MODEL)
+      confirm_output.reply = _clean_reply(confirm_output.reply)
 
       logger.info('turn.crop_confirmation_asked', turn=turn_num, crop=crop_value)
       state.history.append(ConversationHistory(role=Role.USER, content=input))
@@ -118,6 +132,7 @@ async def conversation(input: str, state: ConversationState, channel: str = 'voi
       confirm_messages = [{'role': 'system', 'content': confirm_prompt}]
       with tracer.start_as_current_span('agent.grade_confirmation'):
         confirm_output = await get_llm_response(confirm_messages, ConversationOutput, model=settings.PROCUREMENT_MODEL)
+      confirm_output.reply = _clean_reply(confirm_output.reply)
 
       logger.info('turn.grade_confirmation_asked', turn=turn_num, crop=crop_value, grade=grade_value)
       state.history.append(ConversationHistory(role=Role.USER, content=input))
@@ -180,6 +195,7 @@ async def conversation(input: str, state: ConversationState, channel: str = 'voi
       logger.error('turn.reply_failed', turn=turn_num, exc_info=True)
       return {'reply': "Sorry, I'm having trouble right now - could you say that again?", 'state': state, 'done': False}
 
+    reply_output.reply = _clean_reply(reply_output.reply)
     logger.info('turn.reply', turn=turn_num, reply=reply_output.reply, done=done)
 
     # update state history - append-only, never rewritten
