@@ -1,7 +1,7 @@
 import asyncio
 import time
 
-from openai import APIError, APITimeoutError, AsyncOpenAI, RateLimitError
+from openai import APIError, APITimeoutError, AsyncOpenAI, ContentFilterFinishReasonError, LengthFinishReasonError, RateLimitError
 from pydantic import BaseModel, ValidationError
 
 from config import settings
@@ -62,6 +62,11 @@ async def get_llm_response(messages: list[dict], response_model: type[BaseModel]
     except (RateLimitError, APITimeoutError, APIError) as err:
       error = err
       logger.warning('llm.retry', model=model, attempt=attempt, error_type=type(err).__name__, error=str(err))
+      await asyncio.sleep(0.5 * attempt)
+
+    except (LengthFinishReasonError, ContentFilterFinishReasonError) as err:
+      error = err
+      logger.warning('llm.truncated', model=model, attempt=attempt, error_type=type(err).__name__)
       await asyncio.sleep(0.5 * attempt)
 
     except ValidationError as err:

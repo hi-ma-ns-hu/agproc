@@ -1,7 +1,7 @@
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from openai import APITimeoutError, RateLimitError
+from openai import APITimeoutError, ContentFilterFinishReasonError, LengthFinishReasonError, RateLimitError
 from pydantic import BaseModel
 
 from utils import LLMCallFailed, get_llm_response
@@ -92,6 +92,33 @@ async def test_backoff_is_called_between_retries():
       await get_llm_response([{'role': 'user', 'content': 'hi'}], DummyOutput)
 
   mock_sleep.assert_called_once()
+
+
+async def test_retries_then_fails_gracefully_on_length_finish_reason():
+  fake_client = AsyncMock()
+  fake_client.beta.chat.completions.parse = AsyncMock(side_effect=LengthFinishReasonError(completion=MagicMock()))
+  with patch('utils.llm.client.get_llm_client', return_value=fake_client):
+    with patch('asyncio.sleep', new=AsyncMock()):
+      with pytest.raises(LLMCallFailed):
+        await get_llm_response([{'role': 'user', 'content': 'hi'}], DummyOutput, max_retries=2)
+
+  assert fake_client.beta.chat.completions.parse.call_count == 3
+
+
+async def test_retries_after_content_filter_then_succeeds():
+  fake_client = AsyncMock()
+  fake_client.beta.chat.completions.parse = AsyncMock(
+    side_effect=[
+      ContentFilterFinishReasonError(),
+      _fake_response(DummyOutput(reply='recovered')),
+    ]
+  )
+  with patch('utils.llm.client.get_llm_client', return_value=fake_client):
+    with patch('asyncio.sleep', new=AsyncMock()):
+      result = await get_llm_response([{'role': 'user', 'content': 'hi'}], DummyOutput)
+
+  assert result.reply == 'recovered'
+  assert fake_client.beta.chat.completions.parse.call_count == 2
 
 
 async def test_tools_param_omitted_when_none_given():
