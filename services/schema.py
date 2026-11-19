@@ -99,14 +99,21 @@ class ClaimedRecord:
 
   contact: Reading = field(default_factory=Reading)
 
-  def reset_crop_dependent_fields(self):
+  def reset_crop_dependent_fields(self, keep_turn: int | None = None):
     """
     Called when `crop` changes to a genuinely different, already-known value mid-call.
+    A field whose `.turn` is `keep_turn` was just stated in the very turn that changed
+    the crop (e.g. "actually it's wheat, 50 quintals, harvested") and is left alone -
+    only values carried over from the old crop get wiped.
     """
-    self.quantity = Reading(value=Measure())
-    self.grade = Reading()
-    self.crop_state = Reading()
-    self.price = Reading(value=Measure())
+    if self.quantity.turn != keep_turn:
+      self.quantity = Reading(value=Measure())
+    if self.grade.turn != keep_turn:
+      self.grade = Reading()
+    if self.crop_state.turn != keep_turn:
+      self.crop_state = Reading()
+    if self.price.turn != keep_turn:
+      self.price = Reading(value=Measure())
 
 
 # QUALIFICATION

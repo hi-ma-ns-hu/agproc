@@ -1,6 +1,6 @@
 import pytest
 
-from services import Confidence, Measure, Qualification, Reading, Verdict
+from services import ClaimedRecord, Confidence, Measure, Qualification, Reading, Verdict
 
 # Reading: Provenance
 
@@ -74,3 +74,43 @@ def test_decide_carries_optional_price():
   band = Measure(2200, '₹/quintal')
   q.decide(Verdict.NEGOTIATE, 'asking above reference', price=band)
   assert q.price is band
+
+def test_reset_wipes_stale_fields_from_the_old_crop():
+  record = ClaimedRecord()
+  record.quantity.update(Measure(30, 'quintal'), Confidence.HIGH, turn=2)
+  record.grade.update('A', Confidence.HIGH, turn=2)
+  record.crop_state.update('harvested', Confidence.HIGH, turn=2)
+  record.price.update(Measure(2000, '₹/quintal'), Confidence.HIGH, turn=2)
+
+  record.reset_crop_dependent_fields(keep_turn=5)
+
+  assert record.quantity.is_known() is False
+  assert record.grade.is_known() is False
+  assert record.crop_state.is_known() is False
+  assert record.price.is_known() is False
+
+
+def test_reset_keeps_fields_stated_in_the_same_turn_as_the_crop_change():
+  # farmer says "actually it's wheat, 50 quintals, harvested" all in one turn -
+  # the new crop and its facts are set together and must survive the reset.
+  record = ClaimedRecord()
+  record.quantity.update(Measure(50, 'quintal'), Confidence.HIGH, turn=5)
+  record.crop_state.update('harvested', Confidence.HIGH, turn=5)
+
+  record.reset_crop_dependent_fields(keep_turn=5)
+
+  assert record.quantity.value.value == 50
+  assert record.crop_state.value == 'harvested'
+
+
+def test_reset_wipes_old_fields_but_keeps_only_the_ones_from_this_turn():
+  # a mix: price carried over from the old crop (stale), quantity just restated
+  # this turn alongside the new crop - only the stale one should be cleared.
+  record = ClaimedRecord()
+  record.price.update(Measure(2000, '₹/quintal'), Confidence.HIGH, turn=2)
+  record.quantity.update(Measure(50, 'quintal'), Confidence.HIGH, turn=5)
+
+  record.reset_crop_dependent_fields(keep_turn=5)
+
+  assert record.price.is_known() is False
+  assert record.quantity.value.value == 50

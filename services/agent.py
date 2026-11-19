@@ -104,7 +104,7 @@ async def conversation(input: str, state: ConversationState, channel: str = 'voi
     # qualify (re-resolve crop config: this turn's updates may have just supplied the crop)
     crop_value = state.claimed.crop.value
     if old_crop_value is not None and crop_value is not None and crop_value != old_crop_value:
-      state.claimed.reset_crop_dependent_fields()
+      state.claimed.reset_crop_dependent_fields(keep_turn=turn_num)
       state.qualification = Qualification()
       state.extras.crop_decline_offer_made = False
       logger.info('turn.crop_changed', turn=turn_num, from_crop=old_crop_value, to_crop=crop_value)
