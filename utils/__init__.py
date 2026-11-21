@@ -1,5 +1,5 @@
 from .llm import LLMCallFailed, get_llm_client, get_llm_response
-from .logging import bind_context, clear_context, configure_logging, get_logger, get_tracer, init_tracing
+from .logging import bind_context, clear_context, configure_logging, get_logger, get_meter, get_tracer, init_tracing
 from .storage import REDIS_ENABLED, DBSession, RedisClient, async_session, engine, get_db, get_redis, redis
 
 __all__ = [
@@ -10,6 +10,7 @@ __all__ = [
   'clear_context',
   'init_tracing',
   'get_tracer',
+  'get_meter',
   # cache
   'redis',
   'get_redis',

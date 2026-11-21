@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from opentelemetry import trace
+from opentelemetry import metrics, trace
+from opentelemetry.metrics import Meter
 from opentelemetry.trace import Tracer
 
 from config import settings
@@ -11,6 +12,15 @@ def get_tracer(name: str) -> Tracer:
   Returns a Tracer scoped to the calling module, for creating spans.
   """
   return trace.get_tracer(name)
+
+
+def get_meter(name: str) -> Meter:
+  """
+  Returns a Meter scoped to the calling module, for creating counters/histograms.
+  Reads off the same global MeterProvider Traceloop.init() configures, so instruments
+  created here export through the same pipeline as the gen_ai_client_* metrics.
+  """
+  return metrics.get_meter(name)
 
 
 def init_tracing() -> None:

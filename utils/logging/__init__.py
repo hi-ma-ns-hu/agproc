@@ -10,7 +10,7 @@ from typing import Any
 
 from config import settings
 
-from .tracing import get_tracer, init_tracing
+from .tracing import get_meter, get_tracer, init_tracing
 
 # ── Per-request context (async-safe via ContextVar) ───────────────────────────
 
@@ -202,4 +202,4 @@ def get_logger(name: str) -> BoundLogger:
   return BoundLogger(name)
 
 
-__all__ = ['configure_logging', 'get_logger', 'bind_context', 'clear_context', 'init_tracing', 'get_tracer']
+__all__ = ['configure_logging', 'get_logger', 'bind_context', 'clear_context', 'init_tracing', 'get_tracer', 'get_meter']
