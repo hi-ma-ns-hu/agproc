@@ -4,9 +4,9 @@ from pipecat.observers.error_observer import ErrorObserver
 from pipecat.observers.startup_timing_observer import StartupTimingObserver
 from pipecat.observers.user_bot_latency_observer import UserBotLatencyObserver
 from pipecat.pipeline.pipeline import Pipeline
-from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.workers.runner import WorkerRunner
 
 from utils import get_logger, get_meter, get_tracer
 
@@ -139,5 +139,6 @@ async def run_conversation_pipeline(transport, conversation, build_state, conver
     logger.info('call.disconnected')
     await task.cancel()
 
-  runner = PipelineRunner()
-  await runner.run(task)
+  runner = WorkerRunner()
+  await runner.add_workers(task)
+  await runner.run()
